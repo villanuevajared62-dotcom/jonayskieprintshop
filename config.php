@@ -33,7 +33,7 @@
 
     // Send JSON response
     if (!function_exists('sendJsonResponse')) {
-        function sendJsonResponse($data) {
+        function sendJsonResponse($data) { 
             header('Content-Type: application/json');
             echo json_encode($data);
             exit;

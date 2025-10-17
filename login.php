@@ -1,7 +1,7 @@
 <?php
 // login.php
-
-if (session_status() == PHP_SESSION_NONE) {
+session_name('user_session'); // Unique name for user
+if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
@@ -27,39 +27,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         sendJsonResponse(['success' => false, 'message' => 'Invalid email format']);
     }
 
+    // ===============================
+    // 🗄 DATABASE LOGIN (normal users)
+    // ===============================
     $pdo = getDBConnection();
     if (!$pdo) {
         sendJsonResponse(['success' => false, 'message' => 'Database connection failed']);
     }
 
-  $stmt = $pdo->prepare("SELECT id, first_name, last_name, email, password_hash, role FROM users WHERE email = ?");
-
-
+    $stmt = $pdo->prepare("SELECT id, first_name, last_name, email, password_hash, role FROM users WHERE email = ?");
     $stmt->execute([$email]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$user || !password_verify($password, $user['password_hash'])) {
-
-
+    if (!$user || !password_verify($password, $user['password_hash'])) {
         sendJsonResponse(['success' => false, 'message' => 'Invalid email or password']);
     }
 
-    // Set session variables
+    // ✅ SESSION SETUP
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['user_email'] = $user['email'];
     $_SESSION['user_name'] = $user['first_name'] . ' ' . $user['last_name'];
     $_SESSION['user_role'] = $user['role'];
     $_SESSION['login_time'] = time();
 
-    // Optional remember me token (simple version)
     if ($remember) {
         $token = bin2hex(random_bytes(32));
         setcookie('remember_token', $token, time() + (30 * 24 * 60 * 60), '/', '', false, true);
-        // TODO: Save token in DB associated with user for real remember-me implementation
     }
 
     $redirect = ($user['role'] === 'admin') ? 'admin.php' : 'dashboard.php';
-
 
     sendJsonResponse([
         'success' => true,
@@ -74,10 +70,8 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
     ]);
     exit;
 }
-
-// If not POST, show login form below
-
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -86,7 +80,20 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
     <title>Login - Jonayskie Prints</title>
     <link rel="stylesheet" href="./css/login.css" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
-    
+    <style>
+        /* Optional: make admin button stand out */
+        .btn-admin {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: #fff;
+        }
+        .btn-admin:hover {
+            background: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+        }
+        .auth-divider span {
+            color: #555;
+            font-weight: 500;
+        }
+    </style>
 </head>
 <body>
     <div class="auth-container">
@@ -134,8 +141,14 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
                 <div class="auth-divider">
                     <span>Don't have an account?</span>
                 </div>
-
                 <a href="register.php" class="btn btn-secondary btn-full">Create Account</a>
+
+                <div class="auth-divider">
+                    <span>Are you an admin?</span>
+                </div>
+                <a href="login_admin.php" class="btn btn-admin btn-full">
+                    <i class="fas fa-shield-alt"></i> Admin Login
+                </a>
             </form>
 
             <div class="auth-footer">
@@ -144,16 +157,18 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
         </div>
     </div>
 
-    <!-- Notification div -->
     <div id="notification"></div>
 
     <script>
         function togglePassword(id) {
             const input = document.getElementById(id);
+            const icon = input.nextElementSibling.querySelector('i');
             if (input.type === "password") {
                 input.type = "text";
+                icon.classList.replace('fa-eye', 'fa-eye-slash');
             } else {
                 input.type = "password";
+                icon.classList.replace('fa-eye-slash', 'fa-eye');
             }
         }
 
@@ -162,43 +177,31 @@ if (!$user || !password_verify($password, $user['password_hash'])) {
 
         function showNotification(message, type = 'error') {
             notification.textContent = message;
-            notification.className = '';
-            notification.classList.add(type);
+            notification.className = type;
             notification.style.display = 'block';
-
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 4000);
+            setTimeout(() => notification.style.display = 'none', 4000);
         }
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-
             const formData = new FormData(form);
 
             try {
                 const response = await fetch('login.php', {
                     method: 'POST',
                     body: formData,
-                    headers: {
-                        'Accept': 'application/json',
-                    },
+                    headers: { 'Accept': 'application/json' },
                 });
-
                 const data = await response.json();
-
                 if (data.success) {
                     showNotification(data.message, 'success');
-                    // Redirect after a short delay so user sees the message
-                    setTimeout(() => {
-                        window.location.href = data.redirect;
-                    }, 1500);
+                    setTimeout(() => window.location.href = data.redirect, 1500);
                 } else {
                     showNotification(data.message, 'error');
                 }
             } catch (error) {
-                showNotification('An error occurred. Please try again.', 'error');
                 console.error('Error:', error);
+                showNotification('An error occurred. Please try again.', 'error');
             }
         });
     </script>

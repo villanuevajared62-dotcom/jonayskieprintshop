@@ -1,12 +1,65 @@
 <?php
-// dashboard.php
+// dashboard.php - FIXED SECURITY
 
 // Show errors for debugging (remove on production)
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-session_start();
+
+session_name('user_session'); // Unique name for user
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once 'config.php'; // Include the database connection
+
+// ============================================
+// 🔒 STRICT SESSION VALIDATION (NEW)
+// ============================================
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role'])) {
+    // NO VALID SESSION - DESTROY AND REDIRECT
+    if (session_status() == PHP_SESSION_ACTIVE) {
+        session_destroy();
+    }
+    setcookie(session_name(), '', time() - 3600, '/');
+    header('Location: login.php?reason=no_session');
+    exit;
+}
+
+// ONLY ALLOW CUSTOMERS (NOT ADMIN)
+if ($_SESSION['user_role'] !== 'customer') {
+    if ($_SESSION['user_role'] === 'admin') {
+        header('Location: admin.php');
+        exit;
+    }
+    // INVALID ROLE
+    if (session_status() == PHP_SESSION_ACTIVE) {
+        session_destroy();
+    }
+    setcookie(session_name(), '', time() - 3600, '/');
+    header('Location: login.php?reason=invalid_role');
+    exit;
+}
+
+// REGENERATE SESSION ID FOR SECURITY (every 30 mins)
+// SAME CHANGE - 1 HOUR INTERVAL
+if (!isset($_SESSION['last_regen']) || (time() - $_SESSION['last_regen'] > 3600)) {
+    session_regenerate_id(true);
+    $_SESSION['last_regen'] = time();
+}
+
+// 🚨 PREVENT BACK BUTTON CACHING
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+// Get the DB connection
+$conn = getDBConnection();
+if (!$conn) {
+    die("Database connection failed.");
+}
+
 require_once 'config.php'; // Include the database connection
 
 // Get the DB connection
@@ -114,30 +167,66 @@ if (isset($_REQUEST['action'])) {
 
                 sendResponse(true, '', ['orders' => $orders]);
                 break;
+case 'updateOrder':
+    requireLogin();
+    $user_id = $_SESSION['user_id'];
 
-            case 'getStats':
-                requireLogin();
-                $user_id = $_SESSION['user_id'];
+    $order_id = $_POST['order_id'] ?? '';
+    $service = $_POST['service'] ?? '';
+    $quantity = intval($_POST['quantity'] ?? 0);
+    $specifications = $_POST['specifications'] ?? '';
+    $delivery_option = $_POST['delivery_option'] ?? '';
 
-                $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ?");
-                $stmt->execute([$user_id]);
-                $total = $stmt->fetchColumn();
+    // Validation
+    if (!$order_id || !$service || $quantity < 1 || !$specifications || !$delivery_option) {
+        sendResponse(false, 'Missing or invalid fields');
+    }
 
-                $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending'");
-                $stmt->execute([$user_id]);
-                $pending = $stmt->fetchColumn();
+    // Check if order exists, belongs to user, and is NOT completed
+    $stmt = $conn->prepare("
+        SELECT id, status 
+        FROM orders 
+        WHERE id = ? AND user_id = ?
+    ");
+    $stmt->execute([$order_id, $user_id]);
+    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$order) {
+        sendResponse(false, 'Order not found or you do not have permission to edit it.');
+    }
 
-                $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'completed'");
-                $stmt->execute([$user_id]);
-                $completed = $stmt->fetchColumn();
+    // ✅ PREVENT EDITING COMPLETED ORDERS
+    if ($order['status'] === 'completed') {
+        sendResponse(false, 'Cannot edit completed orders.');
+    }
 
-                sendResponse(true, '', [
-                    'total' => (int)$total,
-                    'pending' => (int)$pending,
-                    'completed' => (int)$completed,
-                    'totalSpent' => 0
-                ]);
-                break;
+    // ✅ UPDATE ORDER
+    try {
+        $stmt = $conn->prepare("
+            UPDATE orders 
+            SET service = ?, 
+                quantity = ?, 
+                specifications = ?, 
+                delivery_option = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ");
+        
+        $stmt->execute([
+            $service, 
+            $quantity, 
+            $specifications, 
+            $delivery_option, 
+            $order_id
+        ]);
+
+        sendResponse(true, 'Order updated successfully');
+        
+    } catch (Exception $e) {
+        sendResponse(false, 'Database error: ' . $e->getMessage());
+    }
+    break;
+
 
             default:
                 sendResponse(false, 'Invalid action');
@@ -765,6 +854,39 @@ if ($user) {
             <?php endif; ?>
         });
     </script>
+    <!-- Edit Order Modal -->
+<div id="editOrderModal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <span class="close-modal" id="closeEditModal">&times;</span>
+    <h3>Edit Order</h3>
+    <form id="editOrderForm">
+      <input type="hidden" name="order_id" id="editOrderId">
+      
+      <label for="editQuantity">Quantity:</label>
+      <input type="number" id="editQuantity" name="quantity" required>
+      
+      <label for="editSpecifications">Specifications:</label>
+      <textarea id="editSpecifications" name="specifications" required></textarea>
+      
+      <label for="editAddress">Delivery Address (if applicable):</label>
+      <textarea id="editAddress" name="delivery_address"></textarea>
+      
+      <button type="submit" class="btn-primary">Save Changes</button>
+    </form>
+  </div>
+</div>
+
+<style>
+.modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
+}
+.modal-content {
+  background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 400px;
+}
+.close-modal { float: right; cursor: pointer; font-size: 20px; }
+</style>
+
 
 </body>
 </html>

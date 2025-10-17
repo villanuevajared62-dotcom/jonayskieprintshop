@@ -57,29 +57,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // Hash password and insert user
+    // Hash password and insert user as customer
     $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-
-    // Determine user role (customer by default)
-$adminKeyInput = $_POST['adminKey'] ?? ''; 
-$secretAdminKey = 'JONAYADMIN2025'; // ← change this to anything only you know
-
-if ($adminKeyInput === $secretAdminKey) {
-    $role = 'admin';
-} else {
     $role = 'customer';
-}
 
-// Hash password and insert user
-$passwordHash = password_hash($password, PASSWORD_DEFAULT);
-
-$stmt = $pdo->prepare("
-    INSERT INTO users (first_name, last_name, email, phone, password_hash, role) 
-    VALUES (?, ?, ?, ?, ?, ?)
-");
-
-$result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, $role]);
-
+    $stmt = $pdo->prepare("
+        INSERT INTO users (first_name, last_name, email, phone, password_hash, role) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    ");
 
     $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, $role]);
 
@@ -96,7 +81,8 @@ $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, 
         echo json_encode([
             'success' => true,
             'message' => 'Registration successful!',
-            'user_id' => $userId
+            'user_id' => $userId,
+            'redirect' => 'login.php'
         ]);
         exit;
     } else {
@@ -129,7 +115,6 @@ $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, 
                 <h2>Create Account</h2>
                 <p>Join our community - it's completely free!</p>
             </div>
-
 
             <form class="auth-form" id="registerForm" action="register.php" method="POST" novalidate>
                 <div class="form-row">
@@ -183,12 +168,6 @@ $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, 
                         <input type="password" id="confirmPassword" name="confirmPassword" required />
                         <button type="button" class="password-toggle" onclick="togglePassword('confirmPassword')"></button>
                     </div>
-                                <!-- Optional: Admin Key (only you know) -->
-<div class="form-group" style="display:none;">
-    <label for="adminKey">JONAYADMIN2025</label>
-    <input type="text" id="adminKey" name="adminKey" value="">
-</div>
-
                 </div>
 
                 <div class="form-options">
@@ -229,15 +208,11 @@ $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, 
         function showPopup(message, isSuccess = false) {
             const popup = document.getElementById('popupMessage');
             popup.textContent = message;
-            popup.style.backgroundColor = isSuccess ? '#4CAF50' : '#f44336'; // green or red
+            popup.style.backgroundColor = isSuccess ? '#4CAF50' : '#f44336';
             popup.style.display = 'block';
 
             setTimeout(() => {
                 popup.style.display = 'none';
-                if(isSuccess) {
-                    // Redirect to login after showing success message for 2.5 seconds
-                    window.location.href = 'login.php';
-                }
             }, 2500);
         }
 
@@ -254,6 +229,10 @@ $result = $stmt->execute([$firstName, $lastName, $email, $phone, $passwordHash, 
             .then(data => {
                 if (data.success) {
                     showPopup(data.message || 'Registration successful!', true);
+                    // Redirect to user dashboard after 1.5 seconds
+                    setTimeout(() => {
+                        window.location.href = data.redirect || 'login.php';
+                    }, 1500);
                 } else {
                     showPopup(data.message || 'Registration failed');
                 }

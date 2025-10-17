@@ -62,6 +62,13 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="price-item-price">₱${parseFloat(price).toFixed(2)}</div>
           <div class="price-item-unit">${unit}</div>
         </div>
+        <button class="edit-btn" 
+  data-id="${order.order_id}" 
+  data-quantity="${order.quantity}" 
+  data-specifications="${order.specifications}">
+  Edit
+</button>
+
       `;
     }
     
@@ -448,61 +455,286 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ============== ORDERS LIST ==============
-  const filterStatus = document.getElementById('filterStatus');
-  const ordersList = document.getElementById('ordersList');
+  // ============= ORDERS LIST - UPDATED =============
+const filterStatus = document.getElementById('filterStatus');
+const ordersList = document.getElementById('ordersList');
 
-  function loadOrders() {
-    const status = filterStatus ? filterStatus.value : '';
-
-    if (!ordersList) return;
-
-    ordersList.innerHTML = '<p>Loading orders...</p>';
-
-    fetch('dashboard.php?action=getOrders&status=' + encodeURIComponent(status))
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.data.orders.length > 0) {
-          let html = `
-            <table>
-              <thead>
-                <tr>
-                  <th>Order ID</th>
-                  <th>Service</th>
-                  <th>Quantity</th>
-                  <th>Status</th>
-                  <th>Delivery</th>
-                  <th>Payment</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-          `;
-          data.data.orders.forEach(order => {
-            html += `
+function loadOrders() {
+  const status = filterStatus ? filterStatus.value : '';
+  fetch('dashboard.php?action=getOrders&status=' + encodeURIComponent(status))
+    .then(res => res.json())
+    .then(data => {
+      if (data.success && data.data.orders.length > 0) {
+        let html = `
+          <table>
+            <thead>
               <tr>
-                <td>${order.order_id}</td>
-                <td>${capitalize(order.service)}</td>
-                <td>${order.quantity}</td>
-                <td>${capitalize(order.status)}</td>
-                <td>${capitalize(order.delivery_option)}</td>
-                <td>${capitalize(order.payment_method)}</td>
-                <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                <th>Order ID</th>
+                <th>Service</th>
+                <th>Quantity</th>
+                <th>Status</th>
+                <th>Delivery</th>
+                <th>Payment</th>
+                <th>Date</th>
+                <th>Actions</th>
               </tr>
-            `;
-          });
-          html += '</tbody></table>';
-          ordersList.innerHTML = html;
-        } else {
-          ordersList.innerHTML = '<p>No orders found.</p>';
-        }
-      })
-      .catch(() => {
-        ordersList.innerHTML = '<p>Error loading orders.</p>';
-      });
+            </thead>
+            <tbody>
+        `;
+        data.data.orders.forEach(order => {
+          html += `
+            <tr>
+              <td>${order.order_id}</td>
+              <td>${capitalize(order.service)}</td>
+              <td>${order.quantity}</td>
+              <td>${capitalize(order.status)}</td>
+              <td>${capitalize(order.delivery_option)}</td>
+              <td>${capitalize(order.payment_method)}</td>
+              <td>${new Date(order.created_at).toLocaleDateString()}</td>
+              <td>
+                <button class="edit-btn"
+                  data-id="${order.order_id}"
+                  data-service="${order.service}"
+                  data-quantity="${order.quantity}"
+                  data-specifications="${order.specifications || ''}"
+                  data-delivery="${order.delivery_option}"
+                  data-status="${order.status}"
+                  data-payment="${order.payment_method}">Edit</button>
+              </td>
+            </tr>
+          `;
+        });
+        html += '</tbody></table>';
+        ordersList.innerHTML = html;
+      } else {
+        ordersList.innerHTML = '<p>No orders found.</p>';
+      }
+    })
+    .catch(() => {
+      ordersList.innerHTML = '<p>Error loading orders.</p>';
+    });
+}
+
+// ✅ UPDATED: Event delegation for Edit buttons with status check
+ordersList.addEventListener('click', e => {
+  if (!e.target.classList.contains('edit-btn')) return;
+
+  const btn = e.target;
+  const orderId = btn.dataset.id;
+  const currentStatus = btn.dataset.status;
+  
+  // ✅ CHECK IF ORDER IS COMPLETED
+  if (currentStatus === 'completed') {
+    alert('❌ Cannot edit completed orders. This order has already been completed.');
+    return;
   }
 
-  if (filterStatus) {
-    filterStatus.addEventListener('change', loadOrders);
-  }
+  // ✅ IF NOT COMPLETED, SHOW EDIT MODAL
+  showEditModal(btn);
 });
+
+// ✅ NEW: Show Edit Modal Function
+function showEditModal(btn) {
+  const orderId = btn.dataset.id;
+  const currentService = btn.dataset.service;
+  const currentQuantity = btn.dataset.quantity;
+  const currentSpecs = btn.dataset.specifications || '';
+  const currentDelivery = btn.dataset.delivery;
+
+  // Create modal HTML
+  const modalHTML = `
+    <div id="editOrderModal" style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    ">
+      <div style="
+        background: white;
+        padding: 30px;
+        border-radius: 15px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h2 style="margin: 0; color: #2c3e50;">Edit Order #${orderId}</h2>
+          <button id="closeEditModal" style="
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #7f8c8d;
+          ">&times;</button>
+        </div>
+        
+        <form id="editOrderForm">
+          <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #34495e;">Service:</label>
+            <select id="editService" style="
+              width: 100%;
+              padding: 10px;
+              border: 2px solid #dfe6e9;
+              border-radius: 8px;
+              font-size: 14px;
+            ">
+              <option value="print" ${currentService === 'print' ? 'selected' : ''}>Print</option>
+              <option value="photocopy" ${currentService === 'photocopy' ? 'selected' : ''}>Photocopy</option>
+              <option value="laminating" ${currentService === 'laminating' ? 'selected' : ''}>Laminating</option>
+              <option value="scanning" ${currentService === 'scanning' ? 'selected' : ''}>Scanning</option>
+              <option value="photo-development" ${currentService === 'photo-development' ? 'selected' : ''}>Photo Development</option>
+            </select>
+          </div>
+          
+          <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #34495e;">Quantity:</label>
+            <input type="number" id="editQuantity" value="${currentQuantity}" min="1" style="
+              width: 100%;
+              padding: 10px;
+              border: 2px solid #dfe6e9;
+              border-radius: 8px;
+              font-size: 14px;
+            " required>
+          </div>
+          
+          <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #34495e;">Specifications:</label>
+            <textarea id="editSpecifications" rows="3" style="
+              width: 100%;
+              padding: 10px;
+              border: 2px solid #dfe6e9;
+              border-radius: 8px;
+              font-size: 14px;
+              resize: vertical;
+            " required>${currentSpecs}</textarea>
+          </div>
+          
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 5px; font-weight: 600; color: #34495e;">Delivery Option:</label>
+            <select id="editDelivery" style="
+              width: 100%;
+              padding: 10px;
+              border: 2px solid #dfe6e9;
+              border-radius: 8px;
+              font-size: 14px;
+            ">
+              <option value="pickup" ${currentDelivery === 'pickup' ? 'selected' : ''}>Pickup</option>
+              <option value="delivery" ${currentDelivery === 'delivery' ? 'selected' : ''}>Delivery</option>
+            </select>
+          </div>
+          
+          <div style="display: flex; gap: 10px;">
+            <button type="submit" style="
+              flex: 1;
+              padding: 12px;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+              border: none;
+              border-radius: 8px;
+              font-weight: 600;
+              cursor: pointer;
+              transition: transform 0.2s;
+            " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+              Save Changes
+            </button>
+            <button type="button" id="cancelEdit" style="
+              flex: 1;
+              padding: 12px;
+              background: #95a5a6;
+              color: white;
+              border: none;
+              border-radius: 8px;
+              font-weight: 600;
+              cursor: pointer;
+              transition: transform 0.2s;
+            " onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  // Add modal to page
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+  // Close modal handlers
+  document.getElementById('closeEditModal').addEventListener('click', closeEditModal);
+  document.getElementById('cancelEdit').addEventListener('click', closeEditModal);
+
+  // Submit form handler
+  document.getElementById('editOrderForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    
+    const newService = document.getElementById('editService').value;
+    const newQuantity = document.getElementById('editQuantity').value;
+    const newSpecs = document.getElementById('editSpecifications').value;
+    const newDelivery = document.getElementById('editDelivery').value;
+
+    if (!newQuantity || newQuantity < 1) {
+      alert('Please enter a valid quantity.');
+      return;
+    }
+
+    if (!newSpecs.trim()) {
+      alert('Specifications are required.');
+      return;
+    }
+
+    // Send update request
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Updating...';
+
+    fetch('dashboard.php?action=updateOrder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: `order_id=${orderId}&service=${encodeURIComponent(newService)}&quantity=${encodeURIComponent(newQuantity)}&specifications=${encodeURIComponent(newSpecs)}&delivery_option=${encodeURIComponent(newDelivery)}`
+    })
+    .then(res => res.json())
+    .then(result => {
+      if (result.success) {
+        alert('✅ Order updated successfully!');
+        closeEditModal();
+        loadOrders(); // Reload orders
+      } else {
+        alert('❌ Update failed: ' + result.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Changes';
+      }
+    })
+    .catch(() => {
+      alert('❌ Error updating order.');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Changes';
+    });
+  });
+}
+
+// ✅ NEW: Close modal function
+function closeEditModal() {
+  const modal = document.getElementById('editOrderModal');
+  if (modal) {
+    modal.remove();
+  }
+}
+
+// Filter change
+if (filterStatus) {
+  filterStatus.addEventListener('change', loadOrders);
+}
+
+// Initial load
+loadOrders();
+
+
+
+});
+

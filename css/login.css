@@ -638,5 +638,17 @@
 
 /* .btn-full {
     width: 100%;
-} */
+} */.edit-btn {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+.edit-btn:hover {
+  background-color: #45a049;
+}
+
 

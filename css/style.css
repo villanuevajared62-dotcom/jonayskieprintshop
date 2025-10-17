@@ -87,6 +87,7 @@
   .orders-table {
     overflow-x: auto;
   }
+
   
   /* Center dashboard title */
   #pageTitle {
@@ -1960,6 +1961,7 @@ body {
     border-color: #feca57;
 }
 
+
 .delete-btn:hover {
     background: linear-gradient(135deg, #ff6b6b, #ee5a24);
     color: white;
@@ -2427,7 +2429,7 @@ body {
 /* Status Filter Dropdown */
 .orders-filters select {
     padding: 12px 15px 12px 45px;
-    border: 2px solid #e0e6ed;
+    border: 2px solid #eae0ed;
     border-radius: 8px;
     font-size: 14px;
     background: white;
@@ -2437,7 +2439,7 @@ body {
     position: relative;
     background-image: 
         url("data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%23667eea'><path d='M504 256C504 119 393 8 256 8S8 119 8 256s111 248 248 248 248-111 248-248zM227.3 387.3c-6.2 6.2-16.4 6.2-22.6 0L32 214.6c-6.2-6.2-6.2-16.4 0-22.6l22.6-22.6c6.2-6.2 16.4-6.2 22.6 0L216 308.7l185.4-185.4c6.2-6.2 16.4-6.2 22.6 0L446.6 146c6.2 6.2 6.2 16.4 0 22.6L254.6 360.6c-6.2 6.2-16.4 6.2-22.6 0z'/></svg>"),
-        linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        linear-gradient(135deg, #f8f9fa 0%, #100d0d 100%);
     background-repeat: no-repeat, no-repeat;
     background-position: 15px center, 0 0;
     background-size: 16px 16px, 100% 100%;
@@ -2497,7 +2499,7 @@ body {
 /* Option Styling */
 .orders-filters select option {
     padding: 10px 15px;
-    background: white;
+    background: rgb(234, 16, 16);
     color: #2c3e50;
     border: none;
 }
@@ -3604,4 +3606,54 @@ body {
 @keyframes fade {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
+}
+.form-group {
+    margin-bottom: 15px;
+}
+.radio-group {
+    display: flex;
+    gap: 20px; /* Espasyo sa pagitan ng mga radio button */
+    align-items: center;
+}
+label {
+    margin: 0;
+}
+input[type="radio"] {
+    margin-right: 5px;
+}
+@media (max-width: 600px) {
+    .radio-group {
+        flex-direction: column;
+        gap: 10px;
+    }
+    label {
+        width: 100%;
+    }
+}
+label {
+    display: flex;
+    align-items: center;
+    margin-right: 20px; /* Espasyo sa pagitan ng mga opsyon */
+}
+input[type="radio"] {
+    margin-right: 5px; /* Espasyo sa pagitan ng radio button at text */
+}
+@media (max-width: 600px) {
+    label {
+        display: block; /* Nagiging vertical layout sa maliit na screen */
+        margin-bottom: 10px; /* Espasyo sa pagitan ng mga opsyon sa mobile */
+    }
+}
+
+
+.edit-btn {
+  background-color: #4CAF50;
+  color: white;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.edit-btn:hover {
+  background-color: #45a049;
 }
