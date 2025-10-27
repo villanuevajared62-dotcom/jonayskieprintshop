@@ -62,7 +62,7 @@ if (isset($_GET['token'])) {
         input[type="password"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 2px solid #b7c8ed; border-radius: 6px; }
         button { background: #3b82f6; color: #fff; border: none; padding: 12px; border-radius: 6px; width: 100%; font-size: 16px; font-weight: 600; cursor: pointer; }
         button:hover { background: #2563eb; }
-        .message { margin-top: 20px; padding: 12px; border-radius: 6px; font-size: 15px; }
+        .message { margin-t op: 20px; padding: 12px; border-radius: 6px; font-size: 15px; }
         .success { background: #d1fae5; color: #065f46; border: 1px solid #10b981; }
         .error { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
     </style>

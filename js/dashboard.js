@@ -1,91 +1,336 @@
 document.addEventListener('DOMContentLoaded', () => {
   // ============== GLOBAL PRICING STORAGE ==============
-  let currentPricing = {
-    print: 2.00,
-    photocopy: 1.50,
-    scanning: 3.00,
-    'photo-development': 15.00,
-    laminating: 5.00
-  };
+ // ============== GLOBAL PRICING STORAGE ==============
+let currentPricing = {
+  print: 2.00,
+  photocopy: 1.50,
+  scanning: 3.00,
+  'photo-development': 15.00,
+  laminating: 5.00
+};
 
-  // Service icons mapping
-  const serviceIcons = {
-    'print': 'fa-print',
-    'photocopy': 'fa-copy',
-    'scanning': 'fa-scanner',
-    'photo-development': 'fa-camera',
-    'laminating': 'fa-id-card'
-  };
+let lastPricingTimestamp = 0; // Track last update time
 
-  // Service display names
-  const serviceNames = {
-    'print': 'Printing',
-    'photocopy': 'Photocopying',
-    'scanning': 'Scanning',
-    'photo-development': 'Photo Development',
-    'laminating': 'Laminating'
-  };
+// Service icons mapping
+const serviceIcons = {
+  'print': 'fa-print',
+  'photocopy': 'fa-copy',
+  'scanning': 'fa-scanner',
+  'photo-development': 'fa-camera',
+  'laminating': 'fa-id-card'
+};
 
-  // Service units
-  const serviceUnits = {
-    'print': 'per page',
-    'photocopy': 'per page',
-    'scanning': 'per page',
-    'photo-development': 'per photo',
-    'laminating': 'per page'
-  };
+// Service display names
+const serviceNames = {
+  'print': 'Print',
+  'photocopy': 'Photocopy',
+  'scanning': 'Scanning',
+  'photo-development': 'Photo Development',
+  'laminating': 'Laminating'
+};
 
-  // ============== PRICE BOARD DISPLAY ==============
+// Service units
+const serviceUnits = {
+  'print': 'per page',
+  'photocopy': 'per page',
+  'scanning': 'per page',
+  'photo-development': 'per photo',
+  'laminating': 'per page'
+};
+
+// ============== PRICE BOARD DISPLAY ==============
+
+function renderPriceBoard(pricing) {
+  const priceItems = document.getElementById('priceItems');
+  if (!priceItems) return;
+
+  let html = '';
   
-  function renderPriceBoard(pricing) {
-    const priceItems = document.getElementById('priceItems');
-    if (!priceItems) return;
-
-    let html = '';
+  for (const [service, price] of Object.entries(pricing)) {
+    // Skip non-service fields
+    if (['id', 'last_updated', 'source', 'timestamp'].includes(service)) continue;
     
-    for (const [service, price] of Object.entries(pricing)) {
-      // Skip non-service fields
-      if (service === 'id' || service === 'last_updated') continue;
-      
-      const icon = serviceIcons[service] || 'fa-file';
-      const name = serviceNames[service] || service;
-      const unit = serviceUnits[service] || 'per unit';
-      
-      html += `
-        <div class="price-item" data-service="${service}">
-          <div class="price-item-header">
-            <div class="price-item-icon">
-              <i class="fas ${icon}"></i>
-            </div>
-            <div class="price-item-name">${name}</div>
+    const icon = serviceIcons[service] || 'fa-file';
+    const name = serviceNames[service] || service;
+    const unit = serviceUnits[service] || 'per unit';
+    
+    html += `
+      <div class="price-item price-updating" data-service="${service}">
+        <div class="price-item-header">
+          <div class="price-item-icon">
+            <i class="fas ${icon}"></i>
           </div>
-          <div class="price-item-price">₱${parseFloat(price).toFixed(2)}</div>
-          <div class="price-item-unit">${unit}</div>
+          <div class="price-item-name">${name}</div>
         </div>
-        <button class="edit-btn" 
-  data-id="${order.order_id}" 
-  data-quantity="${order.quantity}" 
-  data-specifications="${order.specifications}">
-  Edit
-</button>
+        <div class="price-item-price">₱${parseFloat(price).toFixed(2)}</div>
+        <div class="price-item-unit">${unit}</div>
+      </div>
+    `;
+  }
+  
+  priceItems.innerHTML = html;
+  
+  // Remove animation class after animation completes
+  setTimeout(() => {
+    document.querySelectorAll('.price-item').forEach(item => {
+      item.classList.remove('price-updating');
+    });
+  }, 1000);
+}
 
-      `;
+function updatePriceUpdateTime() {
+  const timeElement = document.getElementById('priceUpdateTime');
+  if (timeElement) {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    timeElement.textContent = `Updated: ${timeStr}`;
+  }
+}
+
+// ============== REAL-TIME PRICING UPDATE SYSTEM ==============
+
+// Fetch latest pricing from server
+async function fetchLatestPricing() {
+  try {
+    const response = await fetch('fetch_pricing.php?t=' + Date.now()); // Cache buster
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
     
-    priceItems.innerHTML = html;
+    const data = await response.json();
+    
+    if (data.error) {
+      console.error('Pricing fetch error:', data.message);
+      return null;
+    }
+    
+    // Check if pricing has changed
+    const newTimestamp = data.timestamp || Date.now();
+    const hasChanged = newTimestamp !== lastPricingTimestamp;
+    
+    if (hasChanged) {
+      console.log('✅ Pricing updated from server:', data);
+      lastPricingTimestamp = newTimestamp;
+      currentPricing = data;
+      return { data, changed: true };
+    }
+    
+    return { data, changed: false };
+    
+  } catch (err) {
+    console.error('Error fetching pricing:', err);
+    return null;
   }
+}
 
-  function updatePriceUpdateTime() {
-    const timeElement = document.getElementById('priceUpdateTime');
-    if (timeElement) {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-      timeElement.innerHTML = `<i class="fas fa-clock"></i> Updated at ${timeStr}`;
+// Show notification when pricing is updated
+function showPricingUpdateNotification() {
+  let notification = document.getElementById('pricing-notification');
+  
+  if (!notification) {
+    notification = document.createElement('div');
+    notification.id = 'pricing-notification';
+    notification.style.cssText = `
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 15px 20px;
+      border-radius: 10px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+      z-index: 1000;
+      display: none;
+      animation: slideIn 0.3s ease-out;
+    `;
+    document.body.appendChild(notification);
+  }
+  
+  notification.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <i class="fas fa-bell" style="font-size: 20px;"></i>
+      <div>
+        <strong>Pricing Updated!</strong><br>
+        <small>New prices are now in effect</small>
+      </div>
+    </div>
+  `;
+  
+  notification.style.display = 'block';
+  
+  setTimeout(() => {
+    notification.style.display = 'none';
+  }, 5000);
+}
+
+// Update all price displays in the UI
+function updateAllPriceDisplays() {
+  // Update service dropdown if exists
+  const serviceDropdown = document.getElementById('serviceDropdown');
+  if (serviceDropdown && currentPricing) {
+    const selectedValue = serviceDropdown.value;
+    serviceDropdown.innerHTML = '<option value="">-- Select Service --</option>';
+    
+    for (const [service, price] of Object.entries(currentPricing)) {
+      if (['id', 'last_updated', 'source', 'timestamp'].includes(service)) continue;
+      
+      const name = serviceNames[service] || service;
+      const option = document.createElement('option');
+      option.value = service;
+      option.dataset.price = price;
+      option.textContent = `${name} - ₱${parseFloat(price).toFixed(2)}`;
+      if (service === selectedValue) option.selected = true;
+      serviceDropdown.appendChild(option);
     }
   }
+  
+  // Update order summary
+  updateSummary();
+}
+
+// Update order summary with current pricing
+function updateSummary() {
+  const form = document.getElementById('newOrderForm');
+  if (!form) return;
+  
+  const service = form.service?.value || '';
+  const quantity = parseInt(form.quantity?.value) || 0;
+  const deliveryOption = form.delivery_option?.value || 'pickup';
+
+  document.getElementById('summaryService')?.textContent = serviceNames[service] || service || '-';
+  document.getElementById('summaryQuantity')?.textContent = quantity || '-';
+  document.getElementById('summaryDelivery')?.textContent = deliveryOption.charAt(0).toUpperCase() + deliveryOption.slice(1);
+
+  // Use current pricing from server
+  const pricePerUnit = currentPricing[service] || 0;
+  const totalPrice = pricePerUnit * quantity;
+  
+  const summaryPriceEl = document.getElementById('summaryPrice');
+  if (summaryPriceEl) {
+    summaryPriceEl.textContent = '₱' + totalPrice.toFixed(2);
+  }
+}
+
+// Initialize pricing system
+async function initializePricing() {
+  console.log('🔄 Initializing pricing system...');
+  
+  const result = await fetchLatestPricing();
+  if (result && result.data) {
+    currentPricing = result.data;
+    renderPriceBoard(currentPricing);
+    updatePriceUpdateTime();
+    updateAllPriceDisplays();
+    console.log('✅ Initial pricing loaded:', currentPricing);
+  }
+}
+
+// Poll for pricing updates every 3 seconds (more frequent)
+let pricingInterval;
+
+function startPricingPolling() {
+  if (pricingInterval) {
+    clearInterval(pricingInterval);
+  }
+  
+  pricingInterval = setInterval(async () => {
+    const result = await fetchLatestPricing();
+    
+    if (result && result.changed) {
+      console.log('🔔 Pricing changed! Updating UI...');
+      renderPriceBoard(currentPricing);
+      updatePriceUpdateTime();
+      updateAllPriceDisplays();
+      showPricingUpdateNotification();
+      
+      // Add pulse animation to price board
+      const priceBoard = document.querySelector('.price-board');
+      if (priceBoard) {
+        priceBoard.style.animation = 'none';
+        setTimeout(() => {
+          priceBoard.style.animation = 'pulse 0.5s ease-in-out';
+        }, 10);
+      }
+    }
+  }, 3000); // Check every 3 seconds
+}
+
+// Listen for pricing updates via localStorage (cross-tab communication)
+window.addEventListener('storage', (e) => {
+  if (e.key === 'pricing_updated') {
+    console.log('🔔 Pricing update signal received from admin!');
+    
+    // Immediately fetch new pricing
+    fetchLatestPricing().then(result => {
+      if (result && result.data) {
+        currentPricing = result.data;
+        renderPriceBoard(currentPricing);
+        updatePriceUpdateTime();
+        updateAllPriceDisplays();
+        showPricingUpdateNotification();
+      }
+    });
+  }
+});
+
+// Manual refresh button
+const refreshBtn = document.getElementById('refreshPrices');
+if (refreshBtn) {
+  refreshBtn.addEventListener('click', async () => {
+    const icon = refreshBtn.querySelector('i');
+    if (icon) {
+      icon.classList.add('fa-spin');
+    }
+    
+    const result = await fetchLatestPricing();
+    if (result && result.data) {
+      currentPricing = result.data;
+      renderPriceBoard(currentPricing);
+      updatePriceUpdateTime();
+      updateAllPriceDisplays();
+    }
+    
+    setTimeout(() => {
+      if (icon) {
+        icon.classList.remove('fa-spin');
+      }
+    }, 1000);
+  });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+  initializePricing();
+  startPricingPolling();
+  
+  console.log('✅ Pricing system initialized and polling started');
+});
+
+// Stop polling when page is hidden (save resources)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (pricingInterval) {
+      clearInterval(pricingInterval);
+      console.log('⏸️ Pricing polling paused (page hidden)');
+    }
+  } else {
+    startPricingPolling();
+    fetchLatestPricing(); // Immediate refresh when page becomes visible
+    console.log('▶️ Pricing polling resumed (page visible)');
+  }
+});
+
+// Export for use in other scripts
+window.pricingAPI = {
+  getCurrentPricing: () => currentPricing,
+  refreshPricing: fetchLatestPricing,
+  updateDisplays: updateAllPriceDisplays
+};
 
   // ============== REAL-TIME PRICING UPDATE SYSTEM ==============
   
@@ -733,6 +978,113 @@ if (filterStatus) {
 
 // Initial load
 loadOrders();
+// Validate step - FIXED: Make file upload optional
+function validateStep(step) {
+    let valid = true;
+    const stepEl = formSteps[step - 1];
+    if (!stepEl) return false;
+    
+    const requiredInputs = stepEl.querySelectorAll('[required]');
+    requiredInputs.forEach(input => {
+        if (!input.value.trim()) {
+            input.classList.add('border-red-500');
+            valid = false;
+        } else {
+            input.classList.remove('border-red-500');
+        }
+    });
+    
+    // REMOVED: File upload is now optional
+    if (step === 3 && fileInput && fileInput.files.length === 0) {
+        alert('Please upload at least one file.');
+        valid = false;
+    }
+    
+    return valid;
+}
+
+// Form submit - IMPROVED: Better error handling and logging
+if (newOrderForm) {
+    newOrderForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        console.log('Form submission started'); // Debug log
+        
+        if (!validateStep(currentStep)) {
+            console.log('Validation failed'); // Debug log
+            return;
+        }
+        
+        const formData = new FormData(newOrderForm);
+        
+        // Debug: Log form data
+        console.log('Form data being sent:');
+        for (let [key, value] of formData.entries()) {
+            console.log(key, value);
+        }
+        
+        // Disable submit button to prevent double submission
+        if (submitOrderBtn) {
+            submitOrderBtn.disabled = true;
+            submitOrderBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+        }
+        
+        try {
+            const response = await fetch(`${API_BASE}?action=createOrder`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            console.log('Response status:', response.status); // Debug log
+            
+            const result = await response.json();
+            console.log('Response data:', result); // Debug log
+            
+            if (result.success) {
+                alert(`Order placed successfully! Order ID: ${result.data.order_id}`);
+                newOrderForm.reset();
+                if (fileList) fileList.innerHTML = '';
+                currentStep = 1;
+                formSteps.forEach((step, index) => {
+                    step.classList.toggle('hidden', index !== 0);
+                });
+                nextStepBtn.style.display = 'block';
+                if (submitOrderBtn) {
+                    submitOrderBtn.style.display = 'none';
+                    submitOrderBtn.disabled = false;
+                    submitOrderBtn.innerHTML = 'Place Order';
+                } if (nextStepBtn) {
+    nextStepBtn.addEventListener('click', () => {
+        // Clear errors in current step
+        formSteps[currentStep - 1].querySelectorAll('.error-message').forEach(el => el.remove());
+        formSteps[currentStep - 1].querySelectorAll('[required]').forEach(input => input.classList.remove('border-red-500'));
+
+        if (validateStep(currentStep)) {
+            formSteps[currentStep - 1].classList.add('hidden');
+            currentStep++;
+            formSteps[currentStep - 1].classList.remove('hidden');
+            prevStepBtn.disabled = currentStep === 1;
+            nextStepBtn.style.display = currentStep === totalSteps ? 'none' : 'block';
+            submitOrderBtn.style.display = currentStep === totalSteps ? 'block' : 'none';
+            updateSummary();
+        } else {
+            // HINDI NA BABALIK SA FIRST STEP - MAG-ALERT LANG
+            showToast('Please complete all required fields in this step.', true);
+        }
+    });
+}
+            }
+        } catch (error) {
+            console.error('Submission error:', error); // Debug log
+            alert('Error: ' + error.message);
+            // Re-enable button
+            if (submitOrderBtn) {
+                submitOrderBtn.disabled = false;
+                submitOrderBtn.innerHTML = 'Place Order';
+            }
+        }
+    });
+}
 
 
 

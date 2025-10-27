@@ -1,892 +1,2284 @@
 <?php
-// dashboard.php - FIXED SECURITY
-
-// Show errors for debugging (remove on production)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-
-session_name('user_session'); // Unique name for user
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-require_once 'config.php'; // Include the database connection
-
-// ============================================
-// 🔒 STRICT SESSION VALIDATION (NEW)
-// ============================================
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role'])) {
-    // NO VALID SESSION - DESTROY AND REDIRECT
-    if (session_status() == PHP_SESSION_ACTIVE) {
-        session_destroy();
+    // dashboard.php - FIXED SECURITY & DYNAMIC PRICING FROM 'pricing' TABLE
+    // Show errors for debugging (remove on production)
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+    error_reporting(E_ALL);
+    session_name('user_session'); // Unique name for user
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
     }
-    setcookie(session_name(), '', time() - 3600, '/');
-    header('Location: login.php?reason=no_session');
-    exit;
-}
-
-// ONLY ALLOW CUSTOMERS (NOT ADMIN)
-if ($_SESSION['user_role'] !== 'customer') {
-    if ($_SESSION['user_role'] === 'admin') {
-        header('Location: admin.php');
-        exit;
-    }
-    // INVALID ROLE
-    if (session_status() == PHP_SESSION_ACTIVE) {
-        session_destroy();
-    }
-    setcookie(session_name(), '', time() - 3600, '/');
-    header('Location: login.php?reason=invalid_role');
-    exit;
-}
-
-// REGENERATE SESSION ID FOR SECURITY (every 30 mins)
-// SAME CHANGE - 1 HOUR INTERVAL
-if (!isset($_SESSION['last_regen']) || (time() - $_SESSION['last_regen'] > 3600)) {
-    session_regenerate_id(true);
-    $_SESSION['last_regen'] = time();
-}
-
-// 🚨 PREVENT BACK BUTTON CACHING
-header('Cache-Control: no-cache, no-store, must-revalidate');
-header('Pragma: no-cache');
-header('Expires: 0');
-
-// Get the DB connection
-$conn = getDBConnection();
-if (!$conn) {
-    die("Database connection failed.");
-}
-
-require_once 'config.php'; // Include the database connection
-
-// Get the DB connection
-$conn = getDBConnection(); // Using PDO for DB connection
-
-if (!$conn) {
-    die("Database connection failed.");
-}
-
-// For demo, set a test user id if none logged in
-if (!isset($_SESSION['user_id'])) {
-    $_SESSION['user_id'] = 1; // Change this to your test user id
-}
-
-if (isset($_REQUEST['action'])) {
-    header('Content-Type: application/json');
-
-    function sendResponse($success, $message = '', $data = []) {
-        echo json_encode([
-            'success' => $success,
-            'message' => $message,
-            'data' => $data
-        ]);
-        exit;
-    }
-
-    function requireLogin() {
-        if (!isset($_SESSION['user_id'])) {
-            sendResponse(false, 'User not authenticated');
+    require_once 'config.php'; // Include the database connection
+    // ============================================
+    // STRICT SESSION VALIDATION (NEW)
+    // ============================================
+    if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_role'])) {
+        // NO VALID SESSION - DESTROY AND REDIRECT
+        if (session_status() == PHP_SESSION_ACTIVE) {
+            session_destroy();
         }
+        setcookie(session_name(), '', time() - 3600, '/');
+        header('Location: login.php?reason=no_session');
+        exit;
     }
-
-    $action = $_REQUEST['action'];
-
-    try {
-        switch ($action) {
-            case 'createOrder':
-                requireLogin();
-                $user_id = $_SESSION['user_id'];
-
-                // Validate inputs
-                $service = $_POST['service'] ?? '';
-                $quantity = intval($_POST['quantity'] ?? 0);
-                $specifications = $_POST['specifications'] ?? '';
-                $delivery_option = $_POST['delivery_option'] ?? 'pickup';
-                $delivery_address = $_POST['delivery_address'] ?? null;
-                $payment_method = $_POST['payment_method'] ?? 'cash';
-
-                if (!$service || $quantity < 1 || !$specifications) {
-                    sendResponse(false, 'Missing or invalid fields');
-                }
-                if ($delivery_option === 'delivery' && empty($delivery_address)) {
-                    sendResponse(false, 'Delivery address is required for delivery');
-                }
-
-                // Begin transaction
-                $conn->beginTransaction();
-
-                // Insert order using prepared statement
-                $stmt = $conn->prepare("INSERT INTO orders (user_id, service, quantity, specifications, delivery_option, delivery_address, payment_method, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NOW())");
-                $stmt->execute([$user_id, $service, $quantity, $specifications, $delivery_option, $delivery_address, $payment_method]);
-                $order_id = $conn->lastInsertId();
-
-                // Handle file upload
-                $uploadedFiles = [];
-                if (!empty($_FILES['files']['name'][0])) {
-                    $uploadDir = __DIR__ . "/uploads/orders/{$order_id}/";
-                    if (!is_dir($uploadDir)) {
-                        mkdir($uploadDir, 0755, true);
+    // ONLY ALLOW CUSTOMERS (NOT ADMIN)
+    if ($_SESSION['user_role'] !== 'customer') {
+        if ($_SESSION['user_role'] === 'admin') {
+            header('Location: admin.php');
+            exit;
+        }
+        // INVALID ROLE
+        if (session_status() == PHP_SESSION_ACTIVE) {
+            session_destroy();
+        }
+        setcookie(session_name(), '', time() - 3600, '/');
+        header('Location: login.php?reason=invalid_role');
+        exit;
+    }
+    // REGENERATE SESSION ID FOR SECURITY (every 30 mins)
+    // SAME CHANGE - 1 HOUR INTERVAL
+    if (!isset($_SESSION['last_regen']) || (time() - $_SESSION['last_regen'] > 3600)) {
+        session_regenerate_id(true);
+        $_SESSION['last_regen'] = time();
+    }
+    // PREVENT BACK BUTTON CACHING
+    header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    // Get the DB connection
+    $conn = getDBConnection();
+    if (!$conn) {
+        die("Database connection failed.");
+    }
+    if (isset($_REQUEST['action'])) {
+        header('Content-Type: application/json');
+        function sendResponse($success, $message = '', $data = []) {
+            echo json_encode([
+                'success' => $success,
+                'message' => $message,
+                'data' => $data
+            ]);
+            exit;
+        }
+        function requireLogin() {
+            if (!isset($_SESSION['user_id'])) {
+                sendResponse(false, 'User not authenticated');
+            }
+        }
+        $action = $_REQUEST['action'];
+        try {
+            switch ($action) {
+                case 'getServices':
+                    requireLogin();
+                    // DYNAMIC: Fetch all prices from 'pricing' table - FIXED: Added photocopying
+                    $stmt = $conn->prepare("
+                        SELECT print_bw, print_color, photocopying, scanning, photo_development, laminating 
+                        FROM pricing WHERE id = 1
+                    ");
+                    $stmt->execute();
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    // Fallback if no pricing row - FIXED: Added photocopying
+                    if (!$row) {
+                        error_log("No pricing row found (id=1). Using defaults.");
+                        $row = [
+                            'print_bw' => 1.00,
+                            'print_color' => 2.00,
+                            'photocopying' => 2.00,
+                            'scanning' => 5.00,
+                            'photo_development' => 15.00,
+                            'laminating' => 20.00
+                        ];
                     }
-                    for ($i = 0; $i < count($_FILES['files']['name']); $i++) {
-                        if ($_FILES['files']['error'][$i] === UPLOAD_ERR_OK) {
-                            $tmp = $_FILES['files']['tmp_name'][$i];
-                            $safe = preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['files']['name'][$i]));
-                            $target = $uploadDir . $safe;
-                            if (move_uploaded_file($tmp, $target)) {
-                                $relative = "uploads/orders/{$order_id}/{$safe}";
-                                $stmtF = $conn->prepare("INSERT INTO order_files (order_id, filename, filepath, uploaded_at) VALUES (?, ?, ?, NOW())");
-                                $stmtF->execute([$order_id, $safe, $relative]);
-                                $uploadedFiles[] = $safe;
+                    sendResponse(true, '', ['prices' => $row]);
+                    break;
+                case 'getDashboardStats':
+                    requireLogin();
+                    $user_id = $_SESSION['user_id'];
+                    // Total orders
+                    $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ?");
+                    $stmt->execute([$user_id]);
+                    $totalOrders = (int)$stmt->fetchColumn();
+                    // Pending orders
+                    $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'pending'");
+                    $stmt->execute([$user_id]);
+                    $pendingOrders = (int)$stmt->fetchColumn();
+                    // Completed orders
+                    $stmt = $conn->prepare("SELECT COUNT(*) FROM orders WHERE user_id = ? AND status = 'completed'");
+                    $stmt->execute([$user_id]);
+                    $completedOrders = (int)$stmt->fetchColumn();
+                    // Total spent (only completed orders)
+                    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE user_id = ? AND status = 'completed'");
+                    $stmt->execute([$user_id]);
+                    $totalSpent = number_format((float)$stmt->fetchColumn(), 2);
+                    sendResponse(true, '', [
+                        'totalOrders' => $totalOrders,
+                        'pendingOrders' => $pendingOrders,
+                        'completedOrders' => $completedOrders,
+                        'totalSpent' => $totalSpent
+                    ]);
+                    break;
+                case 'createOrder':
+                    requireLogin();
+                    $user_id = $_SESSION['user_id'];
+                    // Validate inputs
+                    $service = $_POST['service'] ?? '';
+                    $quantity = intval($_POST['quantity'] ?? 0);
+                    $specifications = $_POST['specifications'] ?? '';
+                    $delivery_option = $_POST['delivery_option'] ?? 'pickup';
+                    $delivery_address = $_POST['delivery_address'] ?? null;
+                    $payment_method = $_POST['payment_method'] ?? 'cash';
+                    $paper_size = $_POST['paper_size'] ?? 'A4';
+                    $photo_size = $_POST['photo_size'] ?? 'A4';
+                    $color_option = $_POST['color_option'] ?? 'bw';
+                    $add_lamination = isset($_POST['add_lamination']) && $_POST['add_lamination'] === 'on';
+                    if (!$service || $quantity < 1 || !$specifications) {
+                        sendResponse(false, 'Missing or invalid fields');
+                    }
+                    if ($delivery_option === 'delivery' && empty($delivery_address)) {
+                        sendResponse(false, 'Delivery address is required for delivery');
+                    }
+                    // Fetch prices - FIXED: Added photocopying to SELECT
+                    $stmt = $conn->prepare("
+                        SELECT print_bw, print_color, photocopying, scanning, photo_development, laminating 
+                        FROM pricing WHERE id = 1
+                    ");
+                    $stmt->execute();
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) {
+                        $row = [
+                            'print_bw' => 1.00,
+                            'print_color' => 2.00,
+                            'photocopying' => 2.00,
+                            'scanning' => 5.00,
+                            'photo_development' => 15.00,
+                            'laminating' => 20.00
+                        ];
+                    }
+                    // Calculate price based on service and options
+                    $service_lower = strtolower($service);
+                    $multiplier = ['A4' => 1.0, 'Short' => 1.0, 'Long' => 1.2][$paper_size] ?? 1.0;
+                    $servicePrice = 0.0;
+                    switch ($service_lower) {
+                        case 'print':
+                            $servicePrice = (($color_option === 'color' ? $row['print_color'] : $row['print_bw']) ?? 0) * $multiplier;
+                            break;
+                        case 'photocopy':
+                            // FIXED: Use photocopying instead of print_color
+                            $servicePrice = (($row['photocopying'] ?? 2.00)) * $multiplier;
+                            break;
+                        case 'scanning':
+                            $servicePrice = ($row['scanning'] ?? 5.00) * $multiplier;
+                            break;
+                        case 'photo development':
+                            $servicePrice = $row['photo_development'] ?? 15.00;
+                            break;
+                        case 'laminating':
+                            $servicePrice = $row['laminating'] ?? 20.00;
+                            break;
+                        default:
+                            $servicePrice = 0;
+                    }
+                    if ($servicePrice <= 0) {
+                        sendResponse(false, 'Invalid service or price not found');
+                    }
+                    $total_amount = $servicePrice * $quantity;
+                    if ($add_lamination && $service_lower !== 'laminating') {
+                        $total_amount += ($row['laminating'] ?? 20.00) * $quantity;
+                        $specifications .= "\nAdd Lamination: Yes";
+                    }
+                    // Append options to specifications if applicable
+                    $specifications = trim($specifications);
+                    if (in_array($service, ['Print', 'Photocopy'])) {
+                        $specs_parts = [$specifications];
+                        $specs_parts[] = "Paper Size: {$paper_size}";
+                        if ($service === 'Print') {
+                            $print_type = $color_option === 'color' ? 'Color' : 'Black & White';
+                            $specs_parts[] = "Print Type: {$print_type}";
+                        } else {
+                            $specs_parts[] = "Copy Type: Color";
+                        }
+                        $specifications = implode("\n", $specs_parts);
+                    }
+                    if ($service_lower === 'photo development') {
+                        $specs_parts = [$specifications];
+                        $specs_parts[] = "Photo Size: Glossy {$photo_size}";
+                        $specifications = implode("\n", $specs_parts);
+                    }
+                    if ($service_lower === 'scanning') {
+                        $specs_parts = [$specifications];
+                        $scan_type = $color_option === 'color' ? 'Color' : 'Black & White';
+                        $specs_parts[] = "Scan Type: {$scan_type}";
+                        $specifications = implode("\n", $specs_parts);
+                    }
+                    // Set delivery_address to null if pickup
+                    $delivery_address = ($delivery_option === 'delivery') ? $delivery_address : null;
+                    // Begin transaction
+                    $conn->beginTransaction();
+                    // Insert order using prepared statement
+                    $stmt = $conn->prepare("INSERT INTO orders (user_id, service, quantity, specifications, delivery_option, delivery_address, payment_method, total_amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())");
+                    $stmt->execute([$user_id, $service, $quantity, $specifications, $delivery_option, $delivery_address, $payment_method, $total_amount]);
+                    $order_id = $conn->lastInsertId();
+                    // Handle file upload
+                    $uploadedFiles = [];
+                    if (!empty($_FILES['files']['name'][0])) {
+                        $uploadDir = __DIR__ . "/uploads/orders/{$order_id}/";
+                        if (!is_dir($uploadDir)) {
+                            mkdir($uploadDir, 0755, true);
+                        }
+                        for ($i = 0; $i < count($_FILES['files']['name']); $i++) {
+                            if ($_FILES['files']['error'][$i] === UPLOAD_ERR_OK) {
+                                $tmp = $_FILES['files']['tmp_name'][$i];
+                                $safe = preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['files']['name'][$i]));
+                                $target = $uploadDir . $safe;
+                                if (move_uploaded_file($tmp, $target)) {
+                                    $relative = "uploads/orders/{$order_id}/{$safe}";
+                                    $stmtF = $conn->prepare("INSERT INTO order_files (order_id, filename, filepath, uploaded_at) VALUES (?, ?, ?, NOW())");
+                                    $stmtF->execute([$order_id, $safe, $relative]);
+                                    $uploadedFiles[] = $safe;
+                                }
                             }
                         }
                     }
-                }
-
-                // Commit transaction
-                $conn->commit();
-
-                sendResponse(true, 'Order placed successfully', ['order_id' => $order_id, 'uploaded_files' => $uploadedFiles]);
-                break;
-
-            case 'getOrders':
-                requireLogin();
-                $user_id = $_SESSION['user_id'];
-                $status = $_GET['status'] ?? '';
-
-                if ($status !== '') {
-                    $stmt = $conn->prepare("SELECT id AS order_id, service, quantity, specifications, delivery_option, status, payment_method, created_at FROM orders WHERE user_id = ? AND status = ? ORDER BY created_at DESC");
-                    $stmt->execute([$user_id, $status]);
-                } else {
-                    $stmt = $conn->prepare("SELECT id AS order_id, service, quantity, specifications, delivery_option, status, payment_method, created_at FROM orders WHERE user_id = ? ORDER BY created_at DESC");
-                    $stmt->execute([$user_id]);
-                }
-                $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-                sendResponse(true, '', ['orders' => $orders]);
-                break;
-case 'updateOrder':
-    requireLogin();
-    $user_id = $_SESSION['user_id'];
-
-    $order_id = $_POST['order_id'] ?? '';
-    $service = $_POST['service'] ?? '';
-    $quantity = intval($_POST['quantity'] ?? 0);
-    $specifications = $_POST['specifications'] ?? '';
-    $delivery_option = $_POST['delivery_option'] ?? '';
-
-    // Validation
-    if (!$order_id || !$service || $quantity < 1 || !$specifications || !$delivery_option) {
-        sendResponse(false, 'Missing or invalid fields');
-    }
-
-    // Check if order exists, belongs to user, and is NOT completed
-    $stmt = $conn->prepare("
-        SELECT id, status 
-        FROM orders 
-        WHERE id = ? AND user_id = ?
-    ");
-    $stmt->execute([$order_id, $user_id]);
-    $order = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$order) {
-        sendResponse(false, 'Order not found or you do not have permission to edit it.');
-    }
-
-    // ✅ PREVENT EDITING COMPLETED ORDERS
-    if ($order['status'] === 'completed') {
-        sendResponse(false, 'Cannot edit completed orders.');
-    }
-
-    // ✅ UPDATE ORDER
-    try {
-        $stmt = $conn->prepare("
-            UPDATE orders 
-            SET service = ?, 
-                quantity = ?, 
-                specifications = ?, 
-                delivery_option = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        
-        $stmt->execute([
-            $service, 
-            $quantity, 
-            $specifications, 
-            $delivery_option, 
-            $order_id
-        ]);
-
-        sendResponse(true, 'Order updated successfully');
-        
-    } catch (Exception $e) {
-        sendResponse(false, 'Database error: ' . $e->getMessage());
-    }
-    break;
-
-
-            default:
-                sendResponse(false, 'Invalid action');
-        }
-    } catch (Exception $e) {
-        if ($conn->inTransaction()) {
-            $conn->rollBack();
-        }
-        sendResponse(false, 'Error: ' . $e->getMessage());
-    }
-}
-
-// Handle profile update via POST
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
-    // Security: Make sure user is logged in
-    if (!isset($_SESSION['user_id'])) {
-        die("Unauthorized");
-    }
-    $user_id = $_SESSION['user_id'];
-
-    // Retrieve and sanitize inputs
-    $first_name = trim($_POST['first_name'] ?? '');
-    $last_name = trim($_POST['last_name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-
-    // Password change fields
-    $current_password = $_POST['current_password'] ?? '';
-    $new_password = $_POST['new_password'] ?? '';
-    $confirm_password = $_POST['confirm_password'] ?? '';
-
-    $errors = [];
-
-    // Basic validation
-    if (!$first_name) $errors[] = "First name is required.";
-    if (!$last_name) $errors[] = "Last name is required.";
-    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Valid email is required.";
-
-    // Check if password change is requested
-    $change_password = false;
-    if ($current_password || $new_password || $confirm_password) {
-        $change_password = true;
-        if (!$current_password) $errors[] = "Current password is required to change password.";
-        if (!$new_password) $errors[] = "New password cannot be empty.";
-        if ($new_password !== $confirm_password) $errors[] = "New password and confirmation do not match.";
-    }
-
-    if (empty($errors)) {
-        // Fetch current user password hash
-        $stmt = $conn->prepare("SELECT password_hash FROM users WHERE id = ?");
-        $stmt->execute([$user_id]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$user) {
-            $errors[] = "User not found.";
-        } else {
-            if ($change_password) {
-                // Verify current password
-                if (!password_verify($current_password, $user['password_hash'])) {
-                    $errors[] = "Current password is incorrect.";
-                }
-            }
-        }
-    }
-
-    if (empty($errors)) {
-        try {
-            // Begin update transaction
-            $conn->beginTransaction();
-
-            // Update user basic info
-            $stmt = $conn->prepare("UPDATE users SET first_name = ?, last_name = ?, email = ?, phone = ? WHERE id = ?");
-            $stmt->execute([$first_name, $last_name, $email, $phone, $user_id]);
-
-            // Update password if requested
-            if ($change_password) {
-                $new_password_hash = password_hash($new_password, PASSWORD_DEFAULT);
-                $stmt = $conn->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
-                $stmt->execute([$new_password_hash, $user_id]);
-            }
-
-            $conn->commit();
-
-            // Set success message
-            $_SESSION['profile_update_success'] = "Profile updated successfully.";
-        } catch (Exception $e) {
-            if ($conn->inTransaction()) $conn->rollBack();
-            $errors[] = "Failed to update profile: " . $e->getMessage();
-        }
-    }
-
-    if (!empty($errors)) {
-        $_SESSION['profile_update_errors'] = $errors;
-    }
-
-    // Redirect back to dashboard
-    header("Location: dashboard.php");
-    exit;
-}
-
-// Fetch user details from the database
-$user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT first_name, last_name, email, phone, role FROM users WHERE id = ?");
-$stmt->execute([$user_id]);
-$user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-// Check if the user data is retrieved
-if ($user) {
-    $first_name = $user['first_name'];
-    $last_name = $user['last_name'];
-    $email = $user['email'];
-    $phone = $user['phone'];
-    $role = $user['role'];
-} else {
-    die("User not found.");
-}
-?>
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dashboard - Jonayskie Prints</title> 
-
-    <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-
-    <!-- Your CSS -->
-    <link rel="stylesheet" href="./css/style.css">
-
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <style>
-        /* Price Board Styles */
-        .price-board {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 15px;
-            padding: 25px;
-            margin-bottom: 30px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            color: white;
-        }
-        
-        .price-board-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid rgba(255,255,255,0.3);
-            padding-bottom: 15px;
-        }
-        
-        .price-board-header h2 {
-            margin: 0;
-            font-size: 24px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .price-board-header i {
-            font-size: 28px;
-        }
-        
-        .price-update-badge {
-            background: rgba(255,255,255,0.2);
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        
-        .price-items {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-        }
-        
-        .price-item {
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(10px);
-            border-radius: 10px;
-            padding: 15px;
-            transition: transform 0.3s ease, background 0.3s ease;
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        
-        .price-item:hover {
-            transform: translateY(-5px);
-            background: rgba(255,255,255,0.25);
-        }
-        
-        .price-item-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-        
-        .price-item-icon {
-            width: 40px;
-            height: 40px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-        }
-        
-        .price-item-name {
-            font-weight: 600;
-            font-size: 16px;
-        }
-        
-        .price-item-price {
-            font-size: 28px;
-            font-weight: bold;
-            margin: 5px 0;
-        }
-        
-        .price-item-unit {
-            font-size: 12px;
-            opacity: 0.8;
-        }
-        
-        .price-loading {
-            text-align: center;
-            padding: 20px;
-            opacity: 0.8;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-        
-        .price-updating {
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-        
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .price-items {
-                grid-template-columns: 1fr;
-            }
-            
-            .price-board-header {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 10px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard-container">
-        <aside class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo">
-                    <i class="fas fa-print"></i>
-                    <span>Jonayskie Prints</span>
-                </div>
-                <button id="closeSidebar" class="close-sidebar">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-
-            <nav class="sidebar-nav">
-                <ul>
-                    <li><a href="#dashboard" class="nav-link active" data-section="dashboard">
-                        <i class="fas fa-tachometer-alt"></i>
-                        <span>Dashboard</span>
-                    </a></li>
-                    <li><a href="#new-order" class="nav-link" data-section="new-order">
-                        <i class="fas fa-plus-circle"></i>
-                        <span>New Order</span>
-                    </a></li>
-                    <li><a href="#orders" class="nav-link" data-section="orders">
-                        <i class="fas fa-list-alt"></i>
-                        <span>My Orders</span>
-                    </a></li>
-                    <li><a href="#profile" class="nav-link" data-section="profile">
-                        <i class="fas fa-user"></i>
-                        <span>Profile</span>
-                    </a></li>
-                </ul>
-            </nav>
-            
-            <div class="sidebar-footer">
-                <a href="logout.php" class="logout-btn">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
-                </a>
-            </div>
-        </aside>
-    
-        <main class="main-content">
-            <header class="dashboard-header">
-                <div class="header-left">
-                    <button id="sidebarToggle" class="sidebar-toggle"><i class="fas fa-bars"></i></button>
-                    <h1 id="pageTitle">Dashboard</h1>
-                </div>
-                <div class="header-right">
-                    <div class="user-info">
-                        <span>Welcome, <strong id="userName"><?php echo htmlspecialchars($first_name); ?></strong></span>
-                        <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
-                    </div>
-                </div>
-            </header>
-
-            <div class="dashboard-content">
-                <!-- Dashboard Section -->
-                <section id="dashboard-section" class="content-section active">
-                    
-                    <!-- PRICE BOARD -->
-                    <div class="price-board">
-                        <div class="price-board-header">
-                            <h2>
-                                <i class="fas fa-tags"></i>
-                                Current Pricing
-                            </h2>
-                            <div class="price-update-badge">
-                                <i class="fas fa-sync-alt"></i>
-                                <span id="priceUpdateTime">Loading...</span>
-                            </div>
-                        </div>
-                        
-                        <div class="price-items" id="priceItems">
-                            <div class="price-loading">
-                                <i class="fas fa-spinner fa-spin"></i> Loading prices...
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-shopping-cart"></i></div>
-                            <div class="stat-info"><h3 id="totalOrders">0</h3><p>Total Orders</p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-clock"></i></div>
-                            <div class="stat-info"><h3 id="pendingOrders">0</h3><p>Pending Orders</p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
-                            <div class="stat-info"><h3 id="completedOrders">0</h3><p>Completed Orders</p></div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-peso-sign"></i></div>
-                            <div class="stat-info"><h3 id="totalSpent">₱0.00</h3><p>Total Spent</p></div>
-                        </div>
-                    </div>
-
-                    <div class="recent-orders">
-                        <h2>Recent Orders</h2>
-                        <div class="orders-table">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Order ID</th>
-                                        <th>Service</th>
-                                        <th>Date</th>
-                                        <th>Status</th>
-                                        <th>Amount</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="recentOrdersTable">
-                                    <tr><td colspan="5" class="no-data">No orders yet</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- New Order Section -->
-                <section id="new-order-section" class="content-section">
-                    <div class="order-form-container">
-                        <h2>Create New Order</h2>
-                        <form id="newOrderForm" class="order-form" enctype="multipart/form-data">
-                            <div class="form-steps">
-                                <div class="form-step" data-step="1">
-                                    <h3>Select Service</h3>
-                                    <div class="service-options" id="serviceOptions">
-                                        <div class="loading-services">
-                                            <label for="serviceDropdown">Select Service:</label>
-                                            <select id="serviceDropdown" name="service" required>
-                                                <option value="">-- Select Service --</option>
-                                                <option value="print">Print</option>
-                                                <option value="photocopy">PhotoCopy</option>
-                                                <option value="laminating">Laminating</option>
-                                                <option value="scanning">Scanning</option>
-                                                <option value="photo-development">Photo Development</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-step" data-step="2">
-                                    <h3>Order Details</h3>
-                                    <div class="form-group">
-                                        <label for="quantity">Quantity</label>
-                                        <input type="number" id="quantity" name="quantity" min="1" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="specifications">Specifications</label>
-                                        <textarea id="specifications" name="specifications" rows="4" placeholder="Describe your order specifications" required></textarea>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Delivery Option</label>
-                                        <div class="radio-group">
-                                            <label>
-                                                <input type="radio" name="delivery_option" value="pickup" checked>
-                                                Pickup
-                                            </label>
-                                            <label>
-                                                <input type="radio" name="delivery_option" value="delivery">
-                                                Delivery
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="form-group" id="deliveryAddressGroup" style="display: none;">
-                                        <label for="delivery_address">Delivery Address</label>
-                                        <textarea id="delivery_address" name="delivery_address" rows="3" placeholder="Enter your complete delivery address"></textarea>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-step" data-step="3">
-                                    <h3>Upload Files & Payment</h3>
-                                    <div class="form-group">
-                                        <label for="orderFiles">Upload Files</label>
-                                        <input type="file" id="orderFiles" name="files[]" multiple>
-                                        <div class="file-list" id="fileList"></div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Payment Method</label>
-                                        <div class="radio-group">
-                                            <label>
-                                                <input type="radio" name="payment_method" value="cash" checked>
-                                                Cash on Pickup/Delivery
-                                            </label>
-                                            <label>
-                                                <input type="radio" name="payment_method" value="gcash">
-                                                GCash
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="order-summary" id="orderSummary">
-                                        <h4>Order Summary</h4>
-                                        <div class="summary-item">
-                                            <span>Service:</span>
-                                            <span id="summaryService">-</span>
-                                        </div>
-                                        <div class="summary-item">
-                                            <span>Quantity:</span>
-                                            <span id="summaryQuantity">-</span>
-                                        </div>
-                                        <div class="summary-item">
-                                            <span>Delivery:</span>
-                                            <span id="summaryDelivery">-</span>
-                                        </div>
-                                        <div class="summary-item total-price">
-                                            <span>Total Price:</span>
-                                            <span id="summaryPrice">₱0.00</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-navigation">
-                                    <button type="button" id="prevStep" disabled>Previous</button>
-                                    <button type="button" id="nextStep">Next</button>
-                                    <button type="submit" id="submitOrder" style="display:none;">Place Order</button>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-                </section>
-
-                <!-- Orders Section -->
-                <section id="orders-section" class="content-section">
-                    <h2>My Orders</h2>
-                    <div class="orders-filter">
-                        <label for="filterStatus">Filter by Status:</label>
-                        <select id="filterStatus" name="filterStatus">
-                            <option value="">All</option>
-                            <option value="pending">Pending</option>
-                            <option value="completed">Completed</option>
-                        </select>
-                    </div>
-                    <div class="orders-list" id="ordersList">
-                        <p>Loading orders...</p>
-                    </div>
-                </section>
-
-                <!-- Profile Section -->
-                <section id="profile-section" class="content-section">
-                    <h2>Profile</h2>
-
-                    <?php
-                    // Display success or error messages
-                    if (isset($_SESSION['profile_update_success'])) {
-                        echo '<div class="alert alert-success">' . htmlspecialchars($_SESSION['profile_update_success']) . '</div>';
-                        unset($_SESSION['profile_update_success']);
+                    // Commit transaction
+                    $conn->commit();
+                    sendResponse(true, 'Order placed successfully', ['order_id' => $order_id, 'uploaded_files' => $uploadedFiles]);
+                    break;
+                case 'getOrders':
+                    requireLogin();
+                    $user_id = $_SESSION['user_id'];
+                    $status = $_GET['status'] ?? '';
+                    if ($status !== '') {
+                        $stmt = $conn->prepare("SELECT id AS order_id, service, quantity, specifications, delivery_option, delivery_address, status, payment_method, created_at, total_amount FROM orders WHERE user_id = ? AND status = ? ORDER BY created_at DESC");
+                        $stmt->execute([$user_id, $status]);
+                    } else {
+                        $stmt = $conn->prepare("SELECT id AS order_id, service, quantity, specifications, delivery_option, delivery_address, status, payment_method, created_at, total_amount FROM orders WHERE user_id = ? ORDER BY created_at DESC");
+                        $stmt->execute([$user_id]);
                     }
-                    if (isset($_SESSION['profile_update_errors'])) {
-                        echo '<div class="alert alert-danger"><ul>';
-                        foreach ($_SESSION['profile_update_errors'] as $error) {
-                            echo '<li>' . htmlspecialchars($error) . '</li>';
+                    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    sendResponse(true, '', ['orders' => $orders]);
+                    break;
+                case 'updateOrder':
+                    requireLogin();
+                    $user_id = $_SESSION['user_id'];
+                    $order_id = $_POST['order_id'] ?? '';
+                    $service = $_POST['service'] ?? '';
+                    $quantity = intval($_POST['quantity'] ?? 0);
+                    $specifications = $_POST['specifications'] ?? '';
+                    $delivery_option = $_POST['delivery_option'] ?? 'pickup';
+                    $delivery_address = $_POST['delivery_address'] ?? '';
+                    $paper_size = $_POST['paper_size'] ?? 'A4';
+                    $photo_size = $_POST['photo_size'] ?? 'A4';
+                    $color_option = $_POST['color_option'] ?? 'bw';
+                    $add_lamination = isset($_POST['add_lamination']) && $_POST['add_lamination'] === 'on';
+                    // Validation
+                    if (!$order_id || !$service || $quantity < 1 || !$specifications) {
+                        sendResponse(false, 'Missing or invalid fields');
+                    }
+                    if ($delivery_option === 'delivery' && empty($delivery_address)) {
+                        sendResponse(false, 'Delivery address is required for delivery');
+                    }
+                    // Check if order exists, belongs to user, and is pending
+                    $stmt = $conn->prepare("SELECT id, status FROM orders WHERE id = ? AND user_id = ?");
+                    $stmt->execute([$order_id, $user_id]);
+                    $order = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$order) {
+                        sendResponse(false, 'Order not found or you do not have permission to edit it.');
+                    }
+                    if ($order['status'] !== 'pending') {
+                        sendResponse(false, 'Only pending orders can be edited.');
+                    }
+                    // Fetch prices - FIXED: Added photocopying to SELECT
+                    $stmt = $conn->prepare("
+                        SELECT print_bw, print_color, photocopying, scanning, photo_development, laminating 
+                        FROM pricing WHERE id = 1
+                    ");
+                    $stmt->execute();
+                    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$row) {
+                        $row = [
+                            'print_bw' => 1.00,
+                            'print_color' => 2.00,
+                            'photocopying' => 2.00,
+                            'scanning' => 5.00,
+                            'photo_development' => 15.00,
+                            'laminating' => 20.00
+                        ];
+                    }
+                    // Calculate new total_amount based on options
+                    $service_lower = strtolower($service);
+                    $multiplier = ['A4' => 1.0, 'Short' => 1.0, 'Long' => 1.2][$paper_size] ?? 1.0;
+                    $servicePrice = 0.0;
+                    switch ($service_lower) {
+                        case 'print':
+                            $servicePrice = (($color_option === 'color' ? $row['print_color'] : $row['print_bw']) ?? 0) * $multiplier;
+                            break;
+                        case 'photocopy':
+                            // FIXED: Use photocopying instead of print_color
+                            $servicePrice = (($row['photocopying'] ?? 2.00)) * $multiplier;
+                            break;
+                        case 'scanning':
+                            $servicePrice = ($row['scanning'] ?? 5.00) * $multiplier;
+                            break;
+                        case 'photo development':
+                            $servicePrice = $row['photo_development'] ?? 15.00;
+                            break;
+                        case 'laminating':
+                            $servicePrice = $row['laminating'] ?? 20.00;
+                            break;
+                        default:
+                            $servicePrice = 0;
+                    }
+                    if ($servicePrice <= 0) {
+                        sendResponse(false, 'Invalid service or price not found');
+                    }
+                    $total_amount = $servicePrice * $quantity;
+                    if ($add_lamination && $service_lower !== 'laminating') {
+                        $total_amount += ($row['laminating'] ?? 20.00) * $quantity;
+                        $specifications .= "\nAdd Lamination: Yes";
+                    }
+                    // Append options to specifications if applicable
+                    $specifications = trim($specifications);
+                    if (in_array($service, ['Print', 'Photocopy'])) {
+                        $specs_parts = [$specifications];
+                        $specs_parts[] = "Paper Size: {$paper_size}";
+                        if ($service === 'Print') {
+                            $print_type = $color_option === 'color' ? 'Color' : 'Black & White';
+                            $specs_parts[] = "Print Type: {$print_type}";
+                        } else {
+                            $specs_parts[] = "Copy Type: Color";
                         }
-                        echo '</ul></div>';
-                        unset($_SESSION['profile_update_errors']);
+                        $specifications = implode("\n", $specs_parts);
                     }
-                    ?>
-
-                    <form method="POST" action="dashboard.php" class="profile-form">
-                        <input type="hidden" name="update_profile" value="1" />
-
-                        <div class="form-group">
-                            <label for="first_name">First Name</label>
-                            <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($first_name); ?>" required />
-                        </div>
-
-                        <div class="form-group">
-                            <label for="last_name">Last Name</label>
-                            <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($last_name); ?>" required />
-                        </div>
-
-                        <div class="form-group">
-                            <label for="email">Email</label>
-                            <input type="email" id="email" name="email" value="<?php echo htmlspecialchars($email); ?>" required />
-                        </div>
-
-                        <div class="form-group">
-                            <label for="phone">Phone</label>
-                            <input type="text" id="phone" name="phone" value="<?php echo htmlspecialchars($phone); ?>" />
-                        </div>
-
-                        <hr>
-
-                        <h3>Change Password (Optional)</h3>
-
-                        <div class="form-group">
-                            <label for="current_password">Current Password</label>
-                            <input type="password" id="current_password" name="current_password" placeholder="Enter current password" />
-                        </div>
-
-                        <div class="form-group">
-                            <label for="new_password">New Password</label>
-                            <input type="password" id="new_password" name="new_password" placeholder="Enter new password" />
-                        </div>
-
-                        <div class="form-group">
-                            <label for="confirm_password">Confirm New Password</label>
-                            <input type="password" id="confirm_password" name="confirm_password" placeholder="Confirm new password" />
-                        </div>
-
-                        <button type="submit" class="btn-primary">Update Profile</button>
-                    </form>
-                </section>
-
-            </div>
-        </main>
-    </div>
-
-    <script src="./js/dashboard.js"></script>
-
-    <!-- Responsive Navigation JavaScript -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Toggle sidebar on mobile
-            const sidebarToggle = document.getElementById('sidebarToggle');
-            const sidebar = document.getElementById('sidebar');
-            const closeSidebarBtn = document.getElementById('closeSidebar');
-            
-            if (sidebarToggle) {
-                sidebarToggle.addEventListener('click', function() {
-                    sidebar.classList.add('active');
-                });
-            }
-            
-            if (closeSidebarBtn) {
-                closeSidebarBtn.addEventListener('click', function() {
-                    sidebar.classList.remove('active');
-                });
-            }
-            
-            // Close sidebar when clicking on a link (mobile)
-            const sidebarLinks = document.querySelectorAll('.sidebar-nav a');
-            sidebarLinks.forEach(link => {
-                link.addEventListener('click', function() {
-                    if (window.innerWidth <= 768) {
-                        sidebar.classList.remove('active');
+                    if ($service_lower === 'photo development') {
+                        $specs_parts = [$specifications];
+                        $specs_parts[] = "Photo Size: Glossy {$photo_size}";
+                        $specifications = implode("\n", $specs_parts);
                     }
-                });
-            });
-            
-            // Adjust sidebar on window resize
-            window.addEventListener('resize', function() {
-                if (window.innerWidth > 768) {
-                    sidebar.classList.remove('active');
-                }
-            });
-
-            // Auto-show profile section if redirected with messages
-            <?php if (isset($_SESSION['profile_update_success']) || isset($_SESSION['profile_update_errors'])): ?>
-            const profileLink = document.querySelector('.nav-link[data-section="profile"]');
-            if (profileLink) {
-                profileLink.click();
+                    if ($service_lower === 'scanning') {
+                        $specs_parts = [$specifications];
+                        $scan_type = $color_option === 'color' ? 'Color' : 'Black & White';
+                        $specs_parts[] = "Scan Type: {$scan_type}";
+                        $specifications = implode("\n", $specs_parts);
+                    }
+                    // Set delivery_address to null if pickup
+                    $delivery_address = ($delivery_option === 'delivery') ? $delivery_address : null;
+                    // Handle new files upload - REPLACE if new files provided
+                    $uploadedFiles = [];
+                    $replaceFiles = !empty($_FILES['new_files']['name'][0]);
+                    if ($replaceFiles) {
+                        // Delete existing files from DB and disk
+                        $stmtDel = $conn->prepare("DELETE FROM order_files WHERE order_id = ?");
+                        $stmtDel->execute([$order_id]);
+                        $uploadDir = __DIR__ . "/uploads/orders/{$order_id}/";
+                        if (is_dir($uploadDir)) {
+                            $files = glob($uploadDir . '*');
+                            foreach ($files as $file) {
+                                if (is_file($file)) {
+                                    unlink($file);
+                                }
+                            }
+                            rmdir($uploadDir);
+                        }
+                        // Recreate directory
+                        if (!is_dir($uploadDir)) {
+                            mkdir($uploadDir, 0755, true);
+                        }
+                        // Upload new files
+                        for ($i = 0; $i < count($_FILES['new_files']['name']); $i++) {
+                            if ($_FILES['new_files']['error'][$i] === UPLOAD_ERR_OK) {
+                                $tmp = $_FILES['new_files']['tmp_name'][$i];
+                                $safe = preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['new_files']['name'][$i]));
+                                $target = $uploadDir . $safe;
+                                if (move_uploaded_file($tmp, $target)) {
+                                    $relative = "uploads/orders/{$order_id}/{$safe}";
+                                    $stmtF = $conn->prepare("INSERT INTO order_files (order_id, filename, filepath, uploaded_at) VALUES (?, ?, ?, NOW())");
+                                    $stmtF->execute([$order_id, $safe, $relative]);
+                                    $uploadedFiles[] = $safe;
+                                }
+                            }
+                        }
+                    }
+                    // UPDATE ORDER
+                    try {
+                        $conn->beginTransaction();
+                        $stmt = $conn->prepare("
+                            UPDATE orders
+                            SET service = ?,
+                                quantity = ?,
+                                specifications = ?,
+                                delivery_option = ?,
+                                delivery_address = ?,
+                                total_amount = ?,
+                                updated_at = NOW()
+                            WHERE id = ?
+                        ");
+                        $stmt->execute([
+                            $service,
+                            $quantity,
+                            $specifications,
+                            $delivery_option,
+                            $delivery_address,
+                            $total_amount,
+                            $order_id
+                        ]);
+                        $conn->commit();
+                        sendResponse(true, 'Order updated successfully', ['uploaded_files' => $uploadedFiles, 'replaced_files' => $replaceFiles]);
+                    } catch (Exception $e) {
+                        if ($conn->inTransaction()) $conn->rollBack();
+                        sendResponse(false, 'Database error: ' . $e->getMessage());
+                    }
+                    break;
+                default:
+                    sendResponse(false, 'Invalid action');
             }
-            <?php endif; ?>
-        });
-    </script>
-    <!-- Edit Order Modal -->
-<div id="editOrderModal" class="modal" style="display:none;">
-  <div class="modal-content">
-    <span class="close-modal" id="closeEditModal">&times;</span>
-    <h3>Edit Order</h3>
-    <form id="editOrderForm">
-      <input type="hidden" name="order_id" id="editOrderId">
-      
-      <label for="editQuantity">Quantity:</label>
-      <input type="number" id="editQuantity" name="quantity" required>
-      
-      <label for="editSpecifications">Specifications:</label>
-      <textarea id="editSpecifications" name="specifications" required></textarea>
-      
-      <label for="editAddress">Delivery Address (if applicable):</label>
-      <textarea id="editAddress" name="delivery_address"></textarea>
-      
-      <button type="submit" class="btn-primary">Save Changes</button>
-    </form>
-  </div>
-</div>
+        } catch (Exception $e) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            sendResponse(false, 'Error: ' . $e->getMessage());
+        }
+    }
+   // ──────────────────────────────────────────────────────────────
+   //  PROFILE UPDATE – now uses the SAME toast system as orders
+   // ──────────────────────────────────────────────────────────────
+   if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
+       if (!isset($_SESSION['user_id'])) {
+           die("Unauthorized");
+       }
+       $user_id = $_SESSION['user_id'];
 
-<style>
-.modal {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
-}
-.modal-content {
-  background: white; padding: 20px; border-radius: 8px; width: 90%; max-width: 400px;
-}
-.close-modal { float: right; cursor: pointer; font-size: 20px; }
-</style>
+       // ---- INPUT ----
+       $first_name = trim($_POST['first_name'] ?? '');
+       $last_name  = trim($_POST['last_name'] ?? '');
+       $email      = trim($_POST['email'] ?? '');
+       $phone      = trim($_POST['phone'] ?? '');
 
+       $current_password = $_POST['current_password'] ?? '';
+       $new_password     = $_POST['new_password'] ?? '';
+       $confirm_password = $_POST['confirm_password'] ?? '';
 
-</body>
-</html>
+       $errors = [];
+
+       // ---- BASIC VALIDATION ----
+       if (!$first_name) $errors[] = "First name is required.";
+       if (!$last_name)  $errors[] = "Last name is required.";
+       if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Valid email is required.";
+
+       $change_password = !empty($current_password) || !empty($new_password) || !empty($confirm_password);
+       if ($change_password) {
+           if (!$current_password) $errors[] = "Current password is required.";
+           if (!$new_password)     $errors[] = "New password cannot be empty.";
+           if ($new_password !== $confirm_password) $errors[] = "Passwords do not match.";
+       }
+
+       // ---- IF NO ERRORS → UPDATE DB ----
+       if (empty($errors)) {
+           try {
+               $conn->beginTransaction();
+
+               // basic info
+               $stmt = $conn->prepare("UPDATE users SET first_name=?, last_name=?, email=?, phone=? WHERE id=?");
+               $stmt->execute([$first_name, $last_name, $email, $phone, $user_id]);
+
+               // password change (optional)
+               if ($change_password) {
+                   $stmt = $conn->prepare("SELECT password_hash FROM users WHERE id=?");
+                   $stmt->execute([$user_id]);
+                   $hash = $stmt->fetchColumn();
+
+                   if (!password_verify($current_password, $hash)) {
+                       throw new Exception("Current password is incorrect.");
+                   }
+
+                   $new_hash = password_hash($new_password, PASSWORD_DEFAULT);
+                   $stmt = $conn->prepare("UPDATE users SET password_hash=? WHERE id=?");
+                   $stmt->execute([$new_hash, $user_id]);
+               }
+
+               $conn->commit();
+
+               // SUCCESS → store toast data
+               $_SESSION['toast_message'] = "Profile updated successfully.";
+               $_SESSION['toast_type']    = "success";
+           } catch (Exception $e) {
+               if ($conn->inTransaction()) $conn->rollBack();
+               $errors[] = $e->getMessage();
+           }
+       }
+
+       // ---- ERRORS → store toast data ----
+       if (!empty($errors)) {
+           $_SESSION['toast_message'] = implode(" ", $errors);
+           $_SESSION['toast_type']    = "error";
+       }
+
+       // redirect back to the same page (toast will be shown by JS)
+       header("Location: dashboard.php");
+       exit;
+   }
+
+   // ✅ FETCH USER DATA AFTER POST PROCESSING (so it gets the updated values)
+   $user_id = $_SESSION['user_id'];
+   $stmt = $conn->prepare("SELECT first_name, last_name, email, phone, role FROM users WHERE id = ?");
+   $stmt->execute([$user_id]);
+   $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+   // Check if the user data is retrieved
+   if ($user) {
+       $first_name = $user['first_name'];
+       $last_name = $user['last_name'];
+       $email = $user['email'];
+       $phone = $user['phone'];
+       $role = $user['role'];
+   } else {
+       die("User not found.");
+   }
+   ?>
+   <!DOCTYPE html>
+   <html lang="en">
+   <head>
+       <meta charset="UTF-8" />
+       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+       <title>Dashboard - Jonayskie Prints</title>
+       <!-- Font Awesome -->
+       <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+       <!-- Tailwind CSS CDN -->
+       <script src="https://cdn.tailwindcss.com"></script>
+       <!-- Chart.js -->
+       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+       <!-- Custom Tailwind Config for Theme -->
+       <script>
+           tailwind.config = {
+               theme: {
+                   extend: {
+                       colors: {
+                           primary: {
+                               50: '#eff6ff',
+                               500: '#3b82f6',
+                               600: '#2563eb',
+                               700: '#1d4ed8',
+                               900: '#1e3a8a',
+                           }
+                       }
+                   }
+               }
+           }
+       </script>
+       
+       <style>
+           /* Custom media queries for mobile optimization */
+           @media (max-width: 640px) {
+               .price-board {
+                   padding: 0.75rem !important;
+               }
+               .price-header {
+                   font-size: 1.125rem !important;
+                   margin-bottom: 0.75rem !important;
+                   padding-bottom: 0.5rem !important;
+               }
+               .price-grid {
+                   gap: 0.5rem !important;
+               }
+               .price-card {
+                   padding: 0.5rem !important;
+               }
+               .price-icon {
+                   width: 2rem !important;
+                   height: 2rem !important;
+                   margin-bottom: 0.25rem !important;
+               }
+               .price-icon i {
+                   font-size: 0.75rem !important;
+               }
+               .price-name {
+                   font-size: 0.75rem !important;
+                   margin-bottom: 0.25rem !important;
+               }
+               .price-amount {
+                   font-size: 1.125rem !important;
+                   margin-bottom: 0.25rem !important;
+               }
+               .price-unit {
+                   font-size: 0.625rem !important;
+               }
+               .stats-card {
+                   padding: 0.75rem !important;
+               }
+               .stats-icon {
+                   padding: 0.5rem !important;
+               }
+               .stats-icon i {
+                   font-size: 1rem !important;
+               }
+               .stats-number {
+                   font-size: 1.25rem !important;
+               }
+               .stats-label {
+                   font-size: 0.75rem !important;
+               }
+               .recent-header {
+                   padding: 0.75rem !important;
+                   font-size: 1.125rem !important;
+               }
+               .table-th, .table-td {
+                   padding-left: 0.5rem !important;
+                   padding-right: 0.5rem !important;
+                   font-size: 0.75rem !important;
+               }
+               .dashboard-section {
+                   padding: 0.5rem !important;
+               }
+               .recent-orders-table {
+                   font-size: 0.75rem !important;
+               }
+               .recent-orders-table th,
+               .recent-orders-table td {
+                   padding: 0.5rem !important;
+               }
+               .stats-grid {
+                   gap: 0.75rem !important;
+               }
+           }
+           @media (max-width: 480px) {
+               .price-header {
+                   font-size: 1rem !important;
+               }
+               .stats-number {
+                   font-size: 1.125rem !important;
+               }
+               .recent-header {
+                   font-size: 1rem !important;
+                   padding: 0.5rem !important;
+               }
+           }
+           /* Custom Toast Styles */
+           .toast {
+           position: fixed;
+           top: 20px;
+           right: 20px;
+           min-width: 300px;
+           background: linear-gradient(135deg, #4CAF50, #45a049); /* Green gradient for success */
+           color: white;
+           padding: 16px;
+           border-radius: 8px;
+           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+           z-index: 1000;
+           transform: translateX(100%);
+           transition: transform 0.3s ease, opacity 0.3s ease;
+           font-family: Arial, sans-serif;
+           font-size: 14px;
+           }
+
+           .toast.error {
+           background: linear-gradient(135deg, #f44336, #d32f2f); /* Red for errors */
+           }
+
+           .toast.show {
+           transform: translateX(0);
+           opacity: 1;
+           }
+
+           .toast.hidden {
+           opacity: 0;
+           pointer-events: none;
+           }
+
+           .toast-content {
+           display: flex;
+           align-items: center;
+           justify-content: center;
+           border-radius: 50%;
+           transition: background 0.2s;
+           }
+
+           .toast-close:hover {
+           background: rgba(255, 255, 255, 0.2);
+           }
+       </style>
+   </head>
+   <body class="bg-gray-50 min-h-screen">
+       <!-- Toast Notification -->
+       <div id="toast-notification" class="toast hidden">
+       <div class="toast-content">
+           <span id="toast-message"></span>
+           <button class="toast-close">&times;</button>
+       </div>
+       </div>
+       <div class="flex h-screen bg-gray-100">
+           <!-- Sidebar -->
+           <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out lg:static lg:inset-0">
+               <div class="flex items-center justify-between p-4 bg-primary-600 text-white">
+                   <div class="flex items-center space-x-2">
+                       <i class="fas fa-print text-2xl"></i>
+                       <span class="text-xl font-bold">Jonayskie Prints</span>
+                   </div>
+                   <button id="closeSidebar" class="lg:hidden text-white hover:text-gray-200">
+                       <i class="fas fa-times"></i>
+                   </button>
+               </div>
+               <nav class="mt-8 px-4">
+                   <ul class="space-y-2">
+                       <li><a href="#dashboard" class="nav-link flex items-center px-4 py-3 text-gray-700 bg-gray-100 rounded-lg active" data-section="dashboard">
+                           <i class="fas fa-tachometer-alt mr-3 w-5"></i>
+                           <span>Dashboard</span>
+                       </a></li>
+                       <li><a href="#new-order" class="nav-link flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg" data-section="new-order">
+                           <i class="fas fa-plus-circle mr-3 w-5"></i>
+                           <span>New Order</span>
+                       </a></li>
+                       <li><a href="#orders" class="nav-link flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg" data-section="orders">
+                           <i class="fas fa-list-alt mr-3 w-5"></i>
+                           <span>My Orders</span>
+                       </a></li>
+                       <li><a href="#profile" class="nav-link flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-lg" data-section="profile">
+                           <i class="fas fa-user mr-3 w-5"></i>
+                           <span>Profile</span>
+                       </a></li>
+                   </ul>
+               </nav>
+       
+               <div class="absolute bottom-0 w-full p-4 bg-gray-50 border-t">
+                   <a href="logout.php" class="flex items-center text-red-600 hover:text-red-800">
+                       <i class="fas fa-sign-out-alt mr-3 w-5"></i>
+                       <span>Logout</span>
+                   </a>
+               </div>
+           </aside>
+           <!-- Mobile sidebar overlay -->
+           <div id="sidebarOverlay" class="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden hidden"></div>
+           <!-- Main Content -->
+           <div class="flex-1 flex flex-col overflow-hidden lg:ml-0">
+               <!-- Header -->
+               <header class="bg-white shadow-sm border-b">
+                   <div class="px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                       <div class="flex items-center space-x-4">
+                           <button id="sidebarToggle" class="lg:hidden text-gray-500 hover:text-gray-700">
+                               <i class="fas fa-bars text-xl"></i>
+                           </button>
+                           <h1 id="pageTitle" class="text-2xl font-bold text-gray-900">Dashboard</h1>
+                       </div>
+                       <div class="flex items-center space-x-4">
+                           <span class="text-sm text-gray-700">Welcome, <strong class="text-gray-900"><?php echo htmlspecialchars($first_name); ?></strong></span>
+                           <div class="w-8 h-8 bg-primary-500 rounded-full flex items-center justify-center text-white font-semibold">
+                               <i class="fas fa-user-circle text-sm"></i>
+                           </div>
+                       </div>
+                   </div>
+               </header>
+               <!-- Content Area -->
+               <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100 p-2 sm:p-4 md:p-6">
+                   <div class="max-w-7xl mx-auto">
+                       <!-- Dashboard Section -->
+                       <section id="dashboard-section" class="content-section space-y-2 sm:space-y-4 md:space-y-6">
+                           <!-- Price Board -->
+                           <div class="bg-gradient-to-r from-blue-600 to-purple-700 rounded-lg p-1 sm:p-2 md:p-4 text-white shadow-lg price-board">
+                               <div class="flex flex-col lg:flex-row lg:items-center justify-between mb-1 sm:mb-2 md:mb-3 pb-0.5 sm:pb-1 md:pb-2 border-b border-white/30">
+                                   <h2 class="flex items-center space-x-1 sm:space-x-2 text-sm sm:text-base md:text-lg font-bold price-header">
+                                       <i class="fas fa-tags text-xs"></i>
+                                       <span>Current Pricing</span>
+                                   </h2>
+                                   <div class="flex items-center space-x-0.5 sm:space-x-1 mt-0.5 sm:mt-1 lg:mt-0 flex-wrap">
+                                       <div class="flex items-center space-x-0.5 sm:space-x-1 bg-white/20 px-1 sm:px-1.5 py-0.5 rounded-full text-xs">
+                                           <i class="fas fa-sync-alt text-xs"></i>
+                                           <span id="priceUpdateTime" class="text-xs">Loading...</span>
+                                       </div>
+                                       <button id="refreshPrices" class="flex items-center space-x-0.5 sm:space-x-1 bg-white/20 px-1 sm:px-1.5 py-0.5 rounded-full text-xs hover:bg-white/30 transition-colors ml-0.5 sm:ml-0">
+                                           <i class="fas fa-sync text-xs"></i>
+                                           <span class="hidden sm:inline">Refresh</span>
+                                       </button>
+                                   </div>
+                               </div>
+
+                               <div id="priceItems" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3 md:gap-4 price-grid">
+                                   <div class="flex items-center justify-center py-1.5 sm:py-2 md:py-3 text-white/70">
+                                       <i class="fas fa-spinner fa-spin text-sm sm:text-base md:text-lg"></i>
+                                       <span class="ml-0.5 sm:ml-1 text-xs">Loading prices...</span>
+                                   </div>
+                               </div>
+                           </div>
+                   
+                           <!-- Stats Grid -->
+                           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 md:gap-6 stats-grid">
+                               <div class="bg-white rounded-xl p-3 sm:p-4 md:p-6 stats-card shadow-md hover:shadow-lg transition-shadow">
+                                   <div class="flex items-center justify-between">
+                                       <div class="p-2 sm:p-3 md:p-3 bg-blue-100 rounded-lg stats-icon">
+                                           <i class="fas fa-shopping-cart text-blue-600 text-lg sm:text-xl"></i>
+                                       </div>
+                                       <div class="text-right">
+                                           <h3 id="totalOrders" class="text-xl sm:text-2xl md:text-2xl font-bold text-gray-900 stats-number">0</h3>
+                                           <p class="text-xs sm:text-sm text-gray-600 stats-label">Total Orders</p>
+                                       </div>
+                                   </div>
+                               </div>
+                               <div class="bg-white rounded-xl p-3 sm:p-4 md:p-6 stats-card shadow-md hover:shadow-lg transition-shadow">
+                                   <div class="flex items-center justify-between">
+                                       <div class="p-2 sm:p-3 md:p-3 bg-yellow-100 rounded-lg stats-icon">
+                                           <i class="fas fa-clock text-yellow-600 text-lg sm:text-xl"></i>
+                                       </div>
+                                       <div class="text-right">
+                                           <h3 id="pendingOrders" class="text-xl sm:text-2xl md:text-2xl font-bold text-gray-900 stats-number">0</h3>
+                                           <p class="text-xs sm:text-sm text-gray-600 stats-label">Pending Orders</p>
+                                       </div>
+                                   </div>
+                               </div>
+                               <div class="bg-white rounded-xl p-3 sm:p-4 md:p-6 stats-card shadow-md hover:shadow-lg transition-shadow">
+                                   <div class="flex items-center justify-between">
+                                       <div class="p-2 sm:p-3 md:p-3 bg-green-100 rounded-lg stats-icon">
+                                           <i class="fas fa-check-circle text-green-600 text-lg sm:text-xl"></i>
+                                       </div>
+                                       <div class="text-right">
+                                           <h3 id="completedOrders" class="text-xl sm:text-2xl md:text-2xl font-bold text-gray-900 stats-number">0</h3>
+                                           <p class="text-xs sm:text-sm text-gray-600 stats-label">Completed Orders</p>
+                                       </div>
+                                   </div>
+                               </div>
+                               <div class="bg-white rounded-xl p-3 sm:p-4 md:p-6 stats-card shadow-md hover:shadow-lg transition-shadow">
+                                   <div class="flex items-center justify-between">
+                                       <div class="p-2 sm:p-3 md:p-3 bg-purple-100 rounded-lg stats-icon">
+                                           <i class="fas fa-peso-sign text-purple-600 text-lg sm:text-xl"></i>
+                                       </div>
+                                       <div class="text-right">
+                                           <h3 id="totalSpent" class="text-xl sm:text-2xl md:text-2xl font-bold text-gray-900 stats-number">₱0.00</h3>
+                                           <p class="text-xs sm:text-sm text-gray-600 stats-label">Total Spent</p>
+                                       </div>
+                                   </div>
+                               </div>
+                           </div>
+                           <!-- Recent Orders -->
+                           <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                               <div class="p-3 sm:p-4 md:p-6 recent-header border-b">
+                                   <h2 class="text-lg sm:text-xl font-bold text-gray-900">Recent Orders</h2>
+                               </div>
+                               <div class="overflow-x-auto">
+                                   <table class="min-w-full divide-y divide-gray-200 recent-orders-table">
+                                       <thead class="bg-gray-50">
+                                           <tr>
+                                               <th class="px-2 sm:px-3 md:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider table-th">Order ID</th>
+                                               <th class="px-2 sm:px-3 md:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider table-th">Service</th>
+                                               <th class="px-2 sm:px-3 md:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider table-th">Date</th>
+                                               <th class="px-2 sm:px-3 md:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider table-th">Status</th>
+                                               <th class="px-2 sm:px-3 md:px-6 py-2 sm:py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider table-th">Amount</th>
+                                           </tr>
+                                       </thead>
+                                       <tbody id="recentOrdersTable" class="bg-white divide-y divide-gray-200">
+                                           <tr>
+                                               <td colspan="5" class="px-3 sm:px-6 py-8 md:py-12 text-center text-gray-500 text-sm">No orders yet</td>
+                                           </tr>
+                                       </tbody>
+                                   </table>
+                               </div>
+                           </div>
+                       </section>
+                       <!-- New Order Section -->
+                       <section id="new-order-section" class="content-section hidden space-y-6">
+                           <div class="bg-white rounded-xl shadow-md p-6">
+                               <h2 class="text-2xl font-bold text-gray-900 mb-6">Create New Order</h2>
+                               <form id="newOrderForm" class="space-y-6" enctype="multipart/form-data" novalidate>
+                                   <!-- Step 1: Service Selection -->
+                                   <div id="step-1" class="step active">
+                                       <h3 class="text-lg font-semibold text-gray-900 mb-4">Step 1: Select Service & Basics</h3>
+                                       <div class="form-group">
+                                           <label for="serviceDropdown" class="block text-sm font-medium text-gray-700 mb-2">Select Service</label>
+                                           <select id="serviceDropdown" name="service" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent" required>
+                                               <option value="">-- Select Service --</option>
+                                           </select>
+                                       </div>
+
+                                       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                           <div class="form-group">
+                                               <label for="quantity" class="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+                                               <input type="number" id="quantity" name="quantity" min="1" value="1" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" required>
+                                           </div>
+                                           <div class="form-group">
+                                               <label class="block text-sm font-medium text-gray-700 mb-2">Delivery Option</label>
+                                               <div class="flex flex-wrap space-x-4 sm:space-x-6 gap-2">
+                                                   <label class="flex items-center space-x-2">
+                                                       <input type="radio" name="delivery_option" value="pickup" checked class="rounded border-gray-300">
+                                                       <span class="text-sm text-gray-700">Pickup</span>
+                                                   </label>
+                                                   <label class="flex items-center space-x-2">
+                                                       <input type="radio" name="delivery_option" value="delivery" class="rounded border-gray-300">
+                                                       <span class="text-sm text-gray-700">Delivery</span>
+                                                   </label>
+                                               </div>
+                                           </div>
+                                       </div>
+
+                                       <div id="deliveryAddressGroup" class="form-group hidden">
+                                           <label for="delivery_address" class="block text-sm font-medium text-gray-700 mb-2">Delivery Address</label>
+                                           <textarea id="delivery_address" name="delivery_address" rows="3" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Enter your complete delivery address"></textarea>
+                                       </div>
+
+                                       <div class="flex justify-end space-x-4">
+                                           <button type="button" id="next-step-1" class="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:outline-none">Next</button>
+                                       </div>
+                                   </div>
+
+                                   <!-- Step 2: Specifications & Options -->
+                                   <div id="step-2" class="step hidden">
+                                       <h3 class="text-lg font-semibold text-gray-900 mb-4">Step 2: Specifications & Options</h3>
+
+                                       <div id="paperSizeGroup" class="form-group hidden">
+                                           <label for="paper_size" class="block text-sm font-medium text-gray-700 mb-2">Paper Size</label>
+                                           <select id="paper_size" name="paper_size" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                               <option value="A4">A4</option>
+                                               <option value="Short">Short</option>
+                                               <option value="Long">Long</option>
+                                           </select>
+                                       </div>
+
+                                       <div id="photoSizeGroup" class="form-group hidden">
+                                           <label for="photo_size" class="block text-sm font-medium text-gray-700 mb-2">Photo Size</label>
+                                           <select id="photo_size" name="photo_size" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                               <option value="A4">Glossy A4</option>
+                                               <option value="4x6">Glossy 4x6</option>
+                                           </select>
+                                       </div>
+
+                                       <div id="colorOptionGroup" class="form-group hidden">
+                                           <label class="block text-sm font-medium text-gray-700 mb-2">Print Type</label>
+                                           <div class="flex space-x-6">
+                                               <label class="flex items-center space-x-2">
+                                                   <input type="radio" name="color_option" value="bw" checked class="rounded border-gray-300">
+                                                   <span class="text-sm text-gray-700">Black & White</span>
+                                               </label>
+                                               <label class="flex items-center space-x-2">
+                                                   <input type="radio" name="color_option" value="color" class="rounded border-gray-300">
+                                                   <span class="text-sm text-gray-700">Color</span>
+                                               </label>
+                                           </div>
+                                       </div>
+
+                                       <div id="laminationGroup" class="form-group hidden">
+                                           <label class="flex items-center space-x-2">
+                                               <input type="checkbox" name="add_lamination" id="addLamination" class="rounded border-gray-300">
+                                               <span class="text-sm text-gray-700">Add Lamination (₱<span id="lamPrice">20.00</span> extra per item)</span>
+                                           </label>
+                                       </div>
+
+                                       <div class="form-group">
+                                           <label for="specifications" class="block text-sm font-medium text-gray-700 mb-2">Specifications</label>
+                                           <textarea id="specifications" name="specifications" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" placeholder="Describe your order details or type N/A if none." required></textarea>
+                                       </div>
+
+                                       <div class="flex justify-between">
+                                           <button type="button" id="prev-step-2" class="px-6 py-2.5 bg-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-400">Previous</button>
+                                           <button type="button" id="next-step-2" class="px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:outline-none">Next</button>
+                                       </div>
+                                   </div>
+
+                                   <!-- Step 3: Files & Summary -->
+                                   <div id="step-3" class="step hidden">
+                                       <h3 class="text-lg font-semibold text-gray-900 mb-4">Step 3: Upload Files & Review</h3>
+
+                                       <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                                           <div class="form-group">
+                                               <label for="orderFiles" class="block text-sm font-medium text-gray-700 mb-2">Upload Files <span class="text-gray-500 text-xs">(Optional for Scanning)</span></label>
+                                               <input type="file" id="orderFiles" name="files[]" multiple class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                                               <div class="file-list mt-2 space-y-1" id="fileList"></div>
+                                           </div>
+                                           <div class="form-group">
+                                               <p class="text-sm font-medium text-blue-600">Payment Cash Only</p>
+                                           </div>
+                                       </div>
+
+                                       <div class="bg-gray-50 p-4 rounded-lg">
+                                           <h4 class="font-semibold text-gray-900 mb-3">Order Summary</h4>
+                                           <div class="space-y-2 text-sm">
+                                               <div class="flex justify-between"><span>Service:</span><span id="summaryService">-</span></div>
+                                               <div class="flex justify-between"><span>Quantity:</span><span id="summaryQuantity">1</span></div>
+                                               <div class="flex justify-between"><span>Delivery:</span><span id="summaryDelivery">Pickup</span></div>
+                                               <div class="flex justify-between"><span>Paper Size:</span><span id="summaryPaper">A4</span></div>
+                                               <div class="flex justify-between"><span>Print Type:</span><span id="summaryColor">Black & White</span></div>
+                                               <div class="flex justify-between"><span>Lamination:</span><span id="summaryLamination">No</span></div>
+                                               <div class="flex justify-between font-bold text-lg border-t pt-2 mt-2"><span>Total Price:</span><span id="summaryPrice" class="text-primary-600">₱0.00</span></div>
+                                           </div>
+                                       </div>
+
+                                       <div class="flex justify-between pt-4 border-t">
+                                           <button type="button" id="prev-step-3" class="px-6 py-2.5 bg-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-400">Previous</button>
+                                           <button type="submit" id="submitOrder" class="px-6 py-2.5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:outline-none">Place Order</button>
+                                       </div>
+                                   </div>
+                               </form>
+                           </div>
+                       </section>
+                       <!-- Orders Section -->
+                       <section id="orders-section" class="content-section hidden space-y-6">
+                           <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                               <h2 class="text-2xl font-bold text-gray-900">My Orders</h2>
+                               <select id="filterStatus" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 w-full sm:w-auto">
+                                   <option value="">All</option>
+                                   <option value="pending">Pending</option>
+                                   <option value="completed">Completed</option>
+                               </select>
+                           </div>
+                           <div id="ordersList" class="bg-white rounded-xl shadow-md overflow-hidden">
+                               <p class="p-6 text-center text-gray-500">Loading orders...</p>
+                           </div>
+                       </section>
+                       <!-- Profile Section -->
+                       <section id="profile-section" class="content-section hidden space-y-6">
+                           <div class="bg-white rounded-xl shadow-md p-6">
+                               <!-- ======================  PROFILE FORM (replace the old one) ====================== -->
+                               <div class="bg-white rounded-xl shadow-md p-4 sm:p-6 max-w-4xl mx-auto">
+                                   <h2 class="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">Update Your Profile</h2>
+
+                                   <form method="POST" action="dashboard.php" class="space-y-4 sm:space-y-6 text-sm sm:text-base">
+                                       <input type="hidden" name="update_profile" value="1" />
+
+                                       <!-- ==== BASIC INFO – 1 column on mobile, 2 on md+ ==== -->
+                                       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
+                                           <div class="form-group">
+                                               <label for="first_name" class="block font-medium text-gray-700 mb-1">First Name</label>
+                                               <input type="text" id="first_name" name="first_name"
+                                                      value="<?php echo htmlspecialchars($first_name); ?>" required
+                                                      class="w-full p-2 sm:p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                           </div>
+
+                                           <div class="form-group">
+                                               <label for="last_name" class="block font-medium text-gray-700 mb-1">Last Name</label>
+                                               <input type="text" id="last_name" name="last_name"
+                                                      value="<?php echo htmlspecialchars($last_name); ?>" required
+                                                      class="w-full p-2 sm:p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                           </div>
+
+                                           <div class="form-group">
+                                               <label for="email" class="block font-medium text-gray-700 mb-1">Email</label>
+                                               <input type="email" id="email" name="email"
+                                                      value="<?php echo htmlspecialchars($email); ?>" required
+                                                      class="w-full p-2 sm:p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                           </div>
+
+                                           <div class="form-group">
+                                               <label for="phone" class="block font-medium text-gray-700 mb-1">Phone</label>
+                                               <input type="text" id="phone" name="phone"
+                                                      value="<?php echo htmlspecialchars($phone); ?>"
+                                                      class="w-full p-2 sm:p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                           </div>
+                                       </div>
+
+                                       <hr class="border-gray-200">
+
+                                       <h3 class="font-semibold text-gray-900 text-base sm:text-lg">Change Password (Optional)</h3>
+
+                                       <!-- ==== PASSWORD FIELDS – 1 column on mobile, 3 on md+ ==== -->
+                                       <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-6">
+                                           <!-- Current Password -->
+                                           <div class="form-group relative">
+                                               <label for="current_password" class="block font-medium text-gray-700 mb-1">Current Password</label>
+                                               <div class="relative">
+                                                   <input type="password" id="current_password" name="current_password"
+                                                          placeholder="Enter current password"
+                                                          class="w-full p-2 sm:p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                                   <button type="button" tabindex="-1"
+                                                           class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700"
+                                                           onclick="togglePassword(this, 'current_password')">
+                                                       <i class="fas fa-eye"></i>
+                                                   </button>
+                                               </div>
+                                           </div>
+
+                                           <!-- New Password -->
+                                           <div class="form-group relative">
+                                               <label for="new_password" class="block font-medium text-gray-700 mb-1">New Password</label>
+                                               <div class="relative">
+                                                   <input type="password" id="new_password" name="new_password"
+                                                          placeholder="Enter new password"
+                                                          class="w-full p-2 sm:p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                                   <button type="button" tabindex="-1"
+                                                           class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700"
+                                                           onclick="togglePassword(this, 'new_password')">
+                                                       <i class="fas fa-eye"></i>
+                                                   </button>
+                                               </div>
+                                           </div>
+
+                                           <!-- Confirm New Password -->
+                                           <div class="form-group relative">
+                                               <label for="confirm_password" class="block font-medium text-gray-700 mb-1">Confirm New Password</label>
+                                               <div class="relative">
+                                                   <input type="password" id="confirm_password" name="confirm_password"
+                                                          placeholder="Confirm new password"
+                                                          class="w-full p-2 sm:p-3 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                                                   <button type="button" tabindex="-1"
+                                                           class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700"
+                                                           onclick="togglePassword(this, 'confirm_password')">
+                                                       <i class="fas fa-eye"></i>
+                                                   </button>
+                                               </div>
+                                           </div>
+                                       </div>
+                                       <button type="submit"
+                                               class="w-full sm:w-auto px-6 py-2.5 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:outline-none">
+                                           Update Profile
+                                       </button>
+                                   </form>
+                               </div>
+                           </div>
+                       </section>
+                   </div>
+               </main>
+           </div>
+       </div>
+       <!-- Edit Order Modal -->
+       <div id="editOrderModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+           <div class="bg-white p-4 sm:p-6 rounded-lg w-full max-w-md mx-4">
+               <div class="flex justify-between items-center mb-4">
+                   <h3 class="text-lg font-bold text-gray-900">Edit Order</h3>
+                   <button id="closeEditModal" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+               </div>
+               <form id="editOrderForm" class="space-y-4" enctype="multipart/form-data">
+                   <input type="hidden" name="order_id" id="editOrderId">
+       
+                   <div class="form-group">
+                       <label for="editService" class="block text-sm font-medium text-gray-700 mb-2">Service:</label>
+                       <select id="editService" name="service" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" required>
+                           <option value="">-- Select Service --</option>
+                       </select>
+                   </div>
+
+                   <div class="form-group">
+                       <label class="block text-sm font-medium text-gray-700 mb-2">Delivery Option</label>
+                       <div class="flex space-x-6">
+                           <label class="flex items-center space-x-2">
+                               <input type="radio" name="delivery_option" value="pickup" class="rounded border-gray-300">
+                               <span class="text-sm text-gray-700">Pickup</span>
+                           </label>
+                           <label class="flex items-center space-x-2">
+                               <input type="radio" name="delivery_option" value="delivery" class="rounded border-gray-300">
+                               <span class="text-sm text-gray-700">Delivery</span>
+                           </label>
+                       </div>
+                   </div>
+
+                   <div id="editDeliveryAddressGroup" class="form-group hidden">
+                       <label for="editAddress" class="block text-sm font-medium text-gray-700 mb-2">Delivery Address:</label>
+                       <textarea id="editAddress" name="delivery_address" rows="2" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"></textarea>
+                   </div>
+       
+                   <div class="form-group">
+                       <label for="editQuantity" class="block text-sm font-medium text-gray-700 mb-2">Quantity:</label>
+                       <input type="number" id="editQuantity" name="quantity" min="1" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500" />
+                   </div>
+       
+                   <div id="editPaperSizeGroup" class="form-group hidden">
+                       <label for="edit_paper_size" class="block text-sm font-medium text-gray-700 mb-2">Paper Size:</label>
+                       <select id="edit_paper_size" name="paper_size" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                           <option value="A4">A4</option>
+                           <option value="Short">Short</option>
+                           <option value="Long">Long</option>
+                       </select>
+                   </div>
+
+                   <div id="editPhotoSizeGroup" class="form-group hidden">
+                       <label for="edit_photo_size" class="block text-sm font-medium text-gray-700 mb-2">Photo Size:</label>
+                       <select id="edit_photo_size" name="photo_size" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                           <option value="A4">Glossy A4</option>
+                           <option value="4x6">Glossy 4x6</option>
+                       </select>
+                   </div>
+       
+                   <div id="editColorOptionGroup" class="form-group hidden">
+                       <label class="block text-sm font-medium text-gray-700 mb-2">Print Type:</label>
+                       <div class="flex space-x-6">
+                           <label class="flex items-center space-x-2">
+                               <input type="radio" name="color_option" value="bw" class="rounded border-gray-300">
+                               <span class="text-sm text-gray-700">Black & White</span>
+                           </label>
+                           <label class="flex items-center space-x-2">
+                               <input type="radio" name="color_option" value="color" class="rounded border-gray-300">
+                               <span class="text-sm text-gray-700">Color</span>
+                           </label>
+                       </div>
+                   </div>
+
+                   <div id="editLaminationGroup" class="form-group hidden">
+                       <label class="flex items-center space-x-2">
+                           <input type="checkbox" name="add_lamination" id="editAddLamination" class="rounded border-gray-300">
+                           <span class="text-sm text-gray-700">Add Lamination (₱<span id="editLamPrice">20.00</span> extra per item)</span>
+                       </label>
+                   </div>
+       
+                   <div class="form-group">
+                       <label for="editSpecifications" class="block text-sm font-medium text-gray-700 mb-2">Specifications:</label>
+                       <textarea id="editSpecifications" name="specifications" rows="3" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"></textarea>
+                   </div>
+                   <div class="form-group">
+                       <label for="editNewFiles" class="block text-sm font-medium text-gray-700 mb-2">Replace Files (Optional):</label>
+                       <input type="file" id="editNewFiles" name="new_files[]" multiple class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500">
+                       <p class="text-xs text-gray-500 mt-1">Uploading new files will replace the existing ones.</p>
+                   </div>
+       
+                   <button type="submit" class="w-full px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700">Save Changes</button>
+               </form>
+           </div>
+       </div>
+       <script>
+           // Toast Notification Function
+           function showToast(message, isError = false) {
+               const toast = document.getElementById('toast-notification');
+               const messageEl = document.getElementById('toast-message');
+               const closeBtn = document.querySelector('.toast-close');
+
+               if (!toast || !messageEl) return;
+
+               // Set message and class
+               messageEl.textContent = message;
+               toast.classList.remove('error', 'hidden');
+               if (isError) {
+                   toast.classList.add('error');
+               }
+               toast.classList.add('show');
+
+               // Auto-hide after 5 seconds
+               setTimeout(() => {
+                   toast.classList.remove('show');
+                   setTimeout(() => {
+                       toast.classList.add('hidden');
+                       if (isError) toast.classList.remove('error');
+                   }, 300); // Match transition duration
+               }, 5000);
+
+               // Close on button click
+               closeBtn.onclick = () => {
+                   toast.classList.remove('show');
+                   setTimeout(() => {
+                       toast.classList.add('hidden');
+                       if (isError) toast.classList.remove('error');
+                   }, 300);
+               };
+           }
+
+           // CRITICAL FIX: Define showSection globally to avoid undefined errors
+           async function showSection(name) {
+               const sections = {
+                   dashboard: document.getElementById('dashboard-section'),
+                   'new-order': document.getElementById('new-order-section'),
+                   orders: document.getElementById('orders-section'),
+                   profile: document.getElementById('profile-section')
+               };
+               Object.values(sections).forEach(section => {
+                   if (section) section.classList.add('hidden');
+               });
+               const targetSection = sections[name];
+               if (targetSection) {
+                   targetSection.classList.remove('hidden');
+               }
+               const navLinks = document.querySelectorAll('.nav-link');
+               navLinks.forEach(link => {
+                   link.classList.remove('bg-primary-600', 'text-white', 'bg-gray-100', 'text-gray-700', 'active');
+                   if (link.dataset.section === name) {
+                       link.classList.add('bg-primary-600', 'text-white', 'active');
+                   } else {
+                       link.classList.add('bg-gray-100', 'text-gray-700');
+                   }
+               });
+               const pageTitle = document.getElementById('pageTitle');
+               if (pageTitle) {
+                   const title = name.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                   pageTitle.textContent = title;
+               }
+               if (window.innerWidth <= 1024) {
+                   const sidebar = document.getElementById('sidebar');
+                   const sidebarOverlay = document.getElementById('sidebarOverlay');
+                   if (sidebar) sidebar.classList.add('-translate-x-full');
+                   if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+               }
+               // Load data for section
+               if (name === 'dashboard') {
+                   loadDashboardData();
+                   refreshPrices();  // FIXED: Auto-refresh prices when switching to dashboard
+               } else if (name === 'orders') {
+                   loadOrders();
+               } else if (name === 'new-order') {
+                   // REMOVED: await loadServices(); // This was resetting the dropdown!
+                   updateSummary(); // Just refresh summary with existing global prices
+               }
+           }
+           // API base
+           const API_BASE = 'dashboard.php';
+           // Service icons
+           const serviceIcons = {
+               print: 'fa-print',
+               photocopy: 'fa-copy',
+               scanning: 'fa-scanner',
+               'photo development': 'fa-camera',
+               laminating: 'fa-layer-group'
+           };
+           const serviceUnits = {
+               print: 'per page',
+               photocopy: 'per page',
+               scanning: 'per page',
+               'photo development': 'per photo',
+               laminating: 'per item'
+           };
+           // Default prices for fallback - FIXED: Added photocopying
+           const defaultPrices = {
+               print_bw: 1.00,
+               print_color: 2.00,
+               photocopying: 2.00,
+               scanning: 5.00,
+               photo_development: 15.00,
+               laminating: 20.00
+           };
+           // Initial section variable
+           var initialSection = 'dashboard';
+           <?php if (isset($_SESSION['profile_update_success']) || isset($_SESSION['profile_update_errors'])): ?>
+           initialSection = 'profile';
+           <?php endif; ?>
+           document.addEventListener('DOMContentLoaded', function() {
+               const sidebar = document.getElementById('sidebar');
+               const sidebarToggle = document.getElementById('sidebarToggle');
+               const closeSidebar = document.getElementById('closeSidebar');
+               const sidebarOverlay = document.getElementById('sidebarOverlay');
+               const navLinks = document.querySelectorAll('.nav-link');
+               const pageTitle = document.getElementById('pageTitle');
+               // Sidebar toggle
+               if (sidebarToggle) {
+                   sidebarToggle.addEventListener('click', () => {
+                       if (sidebar) sidebar.classList.remove('-translate-x-full');
+                       if (sidebarOverlay) sidebarOverlay.classList.remove('hidden');
+                   });
+               }
+               if (closeSidebar) {
+                   closeSidebar.addEventListener('click', () => {
+                       if (sidebar) sidebar.classList.add('-translate-x-full');
+                       if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+                   });
+               }
+               if (sidebarOverlay) {
+                   sidebarOverlay.addEventListener('click', () => {
+                       if (sidebar) sidebar.classList.add('-translate-x-full');
+                       if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+                   });
+               }
+               // Navigation event listeners
+               navLinks.forEach(link => {
+                   link.addEventListener('click', async (e) => {
+                       e.preventDefault();
+                       await showSection(link.dataset.section);
+                   });
+               });
+               // Window resize
+               window.addEventListener('resize', () => {
+                   if (window.innerWidth > 1024) {
+                       if (sidebar) sidebar.classList.remove('-translate-x-full');
+                       if (sidebarOverlay) sidebarOverlay.classList.add('hidden');
+                   } else {
+                       if (sidebar) sidebar.classList.add('-translate-x-full');
+                   }
+               });
+               // Initial loads
+               loadServices();
+               loadDashboardData();
+               // Show initial section AFTER everything is set up
+               setTimeout(async () => {
+                   await showSection(initialSection);
+               }, 0);
+               // Refresh button for prices
+               const refreshBtn = document.getElementById('refreshPrices');
+               if (refreshBtn) {
+                   refreshBtn.addEventListener('click', async () => {
+                       await refreshPrices();
+                       // Rotate the icon
+                       const icon = refreshBtn.querySelector('i');
+                       icon.classList.add('fa-spin');
+                       setTimeout(() => icon.classList.remove('fa-spin'), 1000);
+                       if (document.getElementById('new-order-section') && !document.getElementById('new-order-section').classList.contains('hidden')) {
+                           updateSummary();
+                       }
+                   });
+               }
+           });
+           // Load Services (initial load - populates dropdown) - FIXED: Use fetch_pricing.php for display prices
+           async function loadServices() {
+               try {
+                   const ts = new Date().getTime();  // Cache-buster
+                   const response = await fetch(`fetch_pricing.php?t=${ts}`);
+                   const prices = await response.json();
+                   window.prices = prices; // Make global for calculations
+                   // Dropdown services (for form) - FIXED: Use photocopying for Photocopy
+                   const dropdownServices = [
+                       { name: 'Print', price: 0, description: '', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: prices.photocopying, description: '', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: prices.scanning, description: '', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: prices.photo_development, description: '', iconKey: 'photo development', unit: 'per photo' }
+                   ];
+                   // Display services (for price board) - FIXED: Use photocopying for Photocopy
+                   const displayServices = [
+                       { name: 'Print B&W', price: prices.print_bw, description: 'Black and white printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Print Color', price: prices.print_color, description: 'Color printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: prices.photocopying, description: 'Color photocopying per page', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: prices.scanning, description: 'Document scanning per page', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: prices.photo_development, description: 'Film photo development per photo', iconKey: 'photo development', unit: 'per photo' },
+                       { name: 'Laminating', price: prices.laminating, description: 'Laminating service per item', iconKey: 'laminating', unit: 'per item' }
+                   ];
+                   window.serviceList = dropdownServices; // for dropdown
+                   displayPrices(displayServices);
+                   populateServiceDropdown(dropdownServices, prices);
+                   populateEditServiceDropdown(dropdownServices);
+                   updatePriceElements(prices); // Update lam prices
+               } catch (error) {
+                   console.error('Error loading services:', error);
+                   // Use defaults on error - FIXED: Added photocopying
+                   const prices = defaultPrices;
+                   window.prices = prices;
+                   const dropdownServices = [
+                       { name: 'Print', price: 0, description: '', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: defaultPrices.photocopying, description: '', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: defaultPrices.scanning, description: '', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: defaultPrices.photo_development, description: '', iconKey: 'photo development', unit: 'per photo' }
+                   ];
+                   const displayServices = [
+                       { name: 'Print B&W', price: defaultPrices.print_bw, description: 'Black and white printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Print Color', price: defaultPrices.print_color, description: 'Color printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: defaultPrices.photocopying, description: 'Color photocopying per page', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: defaultPrices.scanning, description: 'Document scanning per page', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: defaultPrices.photo_development, description: 'Film photo development per photo', iconKey: 'photo development', unit: 'per photo' },
+                       { name: 'Laminating', price: defaultPrices.laminating, description: 'Laminating service per item', iconKey: 'laminating', unit: 'per item' }
+                   ];
+                   window.serviceList = dropdownServices;
+                   displayPrices(displayServices);
+                   populateServiceDropdown(dropdownServices, defaultPrices);
+                   populateEditServiceDropdown(dropdownServices);
+                   updatePriceElements(defaultPrices);
+               }
+           }
+           // Refresh Prices (for interval/refresh - does NOT repopulate dropdown) - FIXED: Use fetch_pricing.php
+           async function refreshPrices() {
+               try {
+                   const ts = new Date().getTime();  // Cache-buster
+                   const response = await fetch(`fetch_pricing.php?t=${ts}`);
+                   const prices = await response.json();
+                   console.log('Fetched prices from DB:', prices);  // DEBUG: Check fetched data
+                   window.prices = prices;
+                   // Recreate displayServices with new prices (for display only) - FIXED: Use photocopying
+                   const displayServices = [
+                       { name: 'Print B&W', price: prices.print_bw, description: 'Black and white printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Print Color', price: prices.print_color, description: 'Color printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: prices.photocopying, description: 'Color photocopying per page', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: prices.scanning, description: 'Document scanning per page', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: prices.photo_development, description: 'Film photo development per photo', iconKey: 'photo development', unit: 'per photo' },
+                       { name: 'Laminating', price: prices.laminating, description: 'Laminating service per item', iconKey: 'laminating', unit: 'per item' }
+                   ];
+                   displayPrices(displayServices);
+                   updatePriceElements(prices);
+                   // FIXED: Recreate and repopulate dropdown services to update option texts with new prices - FIXED: Use photocopying
+                   const dropdownServices = [
+                       { name: 'Print', price: 0, description: '', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: prices.photocopying, description: '', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: prices.scanning, description: '', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: prices.photo_development, description: '', iconKey: 'photo development', unit: 'per photo' }
+                   ];
+                   populateServiceDropdown(dropdownServices, prices);
+                   window.serviceList = dropdownServices;
+                   // Show update time for user feedback
+                   const updateTime = document.getElementById('priceUpdateTime');
+                   if (updateTime) updateTime.textContent = new Date().toLocaleTimeString();
+               } catch (error) {
+                   console.error('Error refreshing prices:', error);
+                   showToast('Failed to update prices. Using defaults.', true);  // FIXED: User feedback on error
+                   // On error, use defaults for display - FIXED: Use photocopying
+                   const prices = defaultPrices;
+                   window.prices = prices;
+                   const displayServices = [
+                       { name: 'Print B&W', price: defaultPrices.print_bw, description: 'Black and white printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Print Color', price: defaultPrices.print_color, description: 'Color printing per page', iconKey: 'print', unit: 'per page' },
+                       { name: 'Photocopy', price: defaultPrices.photocopying, description: 'Color photocopying per page', iconKey: 'photocopy', unit: 'per page' },
+                       { name: 'Scanning', price: defaultPrices.scanning, description: 'Document scanning per page', iconKey: 'scanning', unit: 'per page' },
+                       { name: 'Photo Development', price: defaultPrices.photo_development, description: 'Film photo development per photo', iconKey: 'photo development', unit: 'per photo' },
+                       { name: 'Laminating', price: defaultPrices.laminating, description: 'Laminating service per item', iconKey: 'laminating', unit: 'per item' }
+                   ];
+                   displayPrices(displayServices);
+                   updatePriceElements(defaultPrices);
+               }
+           }
+           // Update price elements (lamination, etc.)
+           function updatePriceElements(prices) {
+               const lamPriceEl = document.getElementById('lamPrice');
+               const editLamPriceEl = document.getElementById('editLamPrice');
+               if (lamPriceEl) lamPriceEl.textContent = prices.laminating.toFixed(2);
+               if (editLamPriceEl) editLamPriceEl.textContent = prices.laminating.toFixed(2);
+           }
+           // Display Prices
+           function displayPrices(serviceList) {
+               const container = document.getElementById('priceItems');
+               const updateTime = document.getElementById('priceUpdateTime');
+               if (!container) return;
+               container.innerHTML = serviceList.map(service => {
+                   const iconClass = serviceIcons[service.iconKey] || 'fa-file-alt';
+                   const unit = serviceUnits[service.iconKey] || 'per unit';
+                   return `
+                       <div class="bg-white/20 backdrop-blur-lg rounded-lg p-2 sm:p-3 md:p-4 text-center transition-all duration-300 hover:bg-white/30 hover:-translate-y-1 border border-white/20 price-card">
+                           <div class="w-8 h-8 sm:w-10 sm:h-10 md:w-10 md:h-10 bg-white/30 rounded-full flex items-center justify-center mx-auto mb-1 sm:mb-2 price-icon">
+                               <i class="fas ${iconClass} text-white text-sm sm:text-sm md:text-sm"></i>
+                           </div>
+                           <h4 class="font-semibold text-xs sm:text-sm md:text-sm mb-0.5 sm:mb-1 price-name">${service.name}</h4>
+                           <div class="text-lg sm:text-xl md:text-2xl font-bold mb-0.5 price-amount">₱${parseFloat(service.price).toFixed(2)}</div>
+                           <p class="text-xs opacity-80 price-unit">${unit}</p>
+                       </div>
+                   `;
+               }).join('');
+               if (updateTime) updateTime.textContent = new Date().toLocaleTimeString();
+           }
+           // Populate Service Dropdown - FIXED: Removed prices from option text
+           function populateServiceDropdown(serviceList, prices) {
+               const select = document.getElementById('serviceDropdown');
+               if (!select) return;
+               const currentValue = select.value; // Preserve current selection
+               select.innerHTML = '<option value="">-- Select Service --</option>' +
+                   serviceList.map(s => { // FIXED: Removed .slice(0, -1) - No need to exclude anything
+                       return `<option value="${s.name}" data-price="${s.name === 'Print' ? 0 : s.price}">${s.name}</option>`;
+                   }).join('');
+               // Restore selection if it was set
+               if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+                   select.value = currentValue;
+               }
+           }
+           // Populate Edit Service Dropdown
+           function populateEditServiceDropdown(serviceList) {
+               const select = document.getElementById('editService');
+               if (!select) return;
+               const currentValue = select.value; // Preserve if editing
+               select.innerHTML = '<option value="">-- Select Service --</option>' +
+                   serviceList.map(s => `<option value="${s.name}">${s.name}</option>`).join(''); // FIXED: Removed .slice(0, -1) - Include all
+               if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+                   select.value = currentValue;
+               }
+           }
+           // Load Dashboard Data
+           async function loadDashboardData() {
+               try {
+                   const response = await fetch(`${API_BASE}?action=getDashboardStats`);
+                   const result = await response.json();
+                   if (result.success) {
+                       const totalOrdersEl = document.getElementById('totalOrders');
+                       const pendingOrdersEl = document.getElementById('pendingOrders');
+                       const completedOrdersEl = document.getElementById('completedOrders');
+                       const totalSpentEl = document.getElementById('totalSpent');
+                       if (totalOrdersEl) totalOrdersEl.textContent = result.data.totalOrders;
+                       if (pendingOrdersEl) pendingOrdersEl.textContent = result.data.pendingOrders;
+                       if (completedOrdersEl) completedOrdersEl.textContent = result.data.completedOrders;
+                       if (totalSpentEl) totalSpentEl.textContent = `₱${result.data.totalSpent}`;
+                       loadRecentOrders();
+                   }
+               } catch (error) {
+                   console.error('Error loading dashboard:', error);
+               }
+           }
+           // Load Recent Orders
+           async function loadRecentOrders() {
+               try {
+                   const response = await fetch(`${API_BASE}?action=getOrders`);
+                   const result = await response.json();
+                   const tableBody = document.getElementById('recentOrdersTable');
+                   if (result.success && tableBody) {
+                       if (result.data.orders.length === 0) {
+                           tableBody.innerHTML = '<tr><td colspan="5" class="px-3 sm:px-6 py-8 md:py-12 text-center text-gray-500 text-sm">No orders yet</td></tr>';
+                       } else {
+                           tableBody.innerHTML = result.data.orders.slice(0, 5).map(order => `
+                               <tr>
+                                   <td class="px-2 sm:px-3 md:px-6 py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900 table-td">${order.order_id}</td>
+                                   <td class="px-2 sm:px-3 md:px-6 py-3 whitespace-nowrap text-xs sm:text-sm text-gray-500 table-td">${order.service}</td>
+                                   <td class="px-2 sm:px-3 md:px-6 py-3 whitespace-nowrap text-xs sm:text-sm text-gray-500 table-td">${new Date(order.created_at).toLocaleDateString()}</td>
+                                   <td class="px-2 sm:px-3 md:px-6 py-3 whitespace-nowrap table-td">
+                                       <span class="px-1 sm:px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}">
+                                           ${order.status}
+                                       </span>
+                                   </td>
+                                   <td class="px-2 sm:px-3 md:px-6 py-3 whitespace-nowrap text-xs sm:text-sm font-medium text-gray-900 table-td">₱${parseFloat(order.total_amount || 0).toFixed(2)}</td>
+                               </tr>
+                           `).join('');
+                       }
+                   }
+               } catch (error) {
+                   console.error('Error loading recent orders:', error);
+               }
+           }
+           // New Order Form - Multi-Step
+           const newOrderForm = document.getElementById('newOrderForm');
+           const deliveryRadios = document.querySelectorAll('input[name="delivery_option"]');
+           const deliveryAddressGroup = document.getElementById('deliveryAddressGroup');
+           const serviceDropdown = document.getElementById('serviceDropdown');
+           const quantityInput = document.getElementById('quantity');
+           const fileInput = document.getElementById('orderFiles');
+           const fileList = document.getElementById('fileList');
+           const paperSizeGroup = document.getElementById('paperSizeGroup');
+           const photoSizeGroup = document.getElementById('photoSizeGroup');
+           const colorOptionGroup = document.getElementById('colorOptionGroup');
+           const laminationGroup = document.getElementById('laminationGroup');
+           const paperSizeSelect = document.getElementById('paper_size');
+           const photoSizeSelect = document.getElementById('photo_size');
+           const specifications = document.getElementById('specifications');
+           const colorRadios = document.querySelectorAll('input[name="color_option"]');
+           const addLaminationCheckbox = document.getElementById('addLamination');
+
+           // Multi-step navigation
+           const steps = document.querySelectorAll('.step');
+           let currentStep = 0;
+
+           function showStep(stepIndex) {
+               steps.forEach((step, index) => {
+                   step.classList.toggle('hidden', index !== stepIndex);
+                   step.classList.toggle('active', index === stepIndex);
+               });
+               currentStep = stepIndex;
+               updateSummary();
+           }
+
+           function nextStep() {
+               if (currentStep < steps.length - 1) {
+                   showStep(currentStep + 1);
+               }
+           }
+
+           function prevStep() {
+               if (currentStep > 0) {
+                   showStep(currentStep - 1);
+               }
+           }
+
+           // Next/Previous buttons
+           document.getElementById('next-step-1').addEventListener('click', () => {
+               if (validateStep(1)) {
+                   nextStep();
+               }
+           });
+
+           document.getElementById('next-step-2').addEventListener('click', () => {
+               if (validateStep(2)) {
+                   nextStep();
+               }
+           });
+
+           document.getElementById('prev-step-2').addEventListener('click', prevStep);
+           document.getElementById('prev-step-3').addEventListener('click', prevStep);
+
+           // Validate specific step
+           function validateStep(stepNum) {
+               let valid = true;
+               const errors = [];
+
+               // Clear previous errors
+               document.querySelectorAll('.error-message').forEach(el => el.remove());
+               document.querySelectorAll('.border-red-500').forEach(el => el.classList.remove('border-red-500'));
+
+               if (stepNum === 1) {
+                   const service = serviceDropdown ? serviceDropdown.value.trim() : '';
+                   const quantityVal = quantityInput ? quantityInput.value.trim() : '';
+                   const deliveryChecked = document.querySelector('input[name="delivery_option"]:checked');
+                   const deliveryOption = deliveryChecked ? deliveryChecked.value : '';
+                   const addressVal = document.getElementById('delivery_address') ? document.getElementById('delivery_address').value.trim() : '';
+
+                   if (!service) {
+                       errors.push('Service is required.');
+                       if (serviceDropdown) serviceDropdown.classList.add('border-red-500');
+                   }
+                   if (!quantityVal || parseInt(quantityVal) < 1) {
+                       errors.push('Quantity must be at least 1.');
+                       if (quantityInput) quantityInput.classList.add('border-red-500');
+                   }
+                   if (!deliveryOption) {
+                       errors.push('Please select a delivery option.');
+                   } else if (deliveryOption === 'delivery' && !addressVal) {
+                       errors.push('Delivery address is required.');
+                       const addressEl = document.getElementById('delivery_address');
+                       if (addressEl) addressEl.classList.add('border-red-500');
+                   }
+
+                   if (errors.length > 0) {
+                       showToast(errors[0], true);
+                       valid = false;
+                   }
+               } else if (stepNum === 2) {
+                   const specsVal = specifications ? specifications.value.trim() : '';
+                   if (!specsVal) {
+                       errors.push('Specifications are required.');
+                       if (specifications) specifications.classList.add('border-red-500');
+                   }
+
+                   // Service-specific validations
+                   const service = serviceDropdown ? serviceDropdown.value : '';
+                   if (service) {
+                       if (['Print', 'Photocopy'].includes(service)) {
+                           const paperVal = paperSizeSelect ? paperSizeSelect.value.trim() : '';
+                           if (!paperVal) {
+                               errors.push('Paper size is required.');
+                               if (paperSizeSelect) paperSizeSelect.classList.add('border-red-500');
+                           }
+                           if (service === 'Print' || service === 'Scanning') {
+                               const colorChecked = document.querySelector('input[name="color_option"]:checked');
+                               if (!colorChecked) {
+                                   errors.push('Please select a print/scan type.');
+                               }
+                           }
+                       }
+                       if (service === 'Photo Development') {
+                           const photoVal = photoSizeSelect ? photoSizeSelect.value.trim() : '';
+                           if (!photoVal) {
+                               errors.push('Photo size is required.');
+                               if (photoSizeSelect) photoSizeSelect.classList.add('border-red-500');
+                           }
+                       }
+                   }
+
+                   if (errors.length > 0) {
+                       showToast(errors[0], true);
+                       valid = false;
+                   }
+               }
+
+               return valid;
+           }
+
+           // Helper: Show error below input
+           function showFieldError(input, message) {
+               // Remove previous error
+               const existing = input.parentNode.querySelector('.error-message');
+               if (existing) existing.remove();
+               const error = document.createElement('p');
+               error.className = 'error-message text-red-500 text-xs mt-1';
+               error.textContent = message;
+               input.parentNode.appendChild(error);
+           }
+
+           // Validate entire form - UPDATED: More specific errors, defaults, and logging (for step 3)
+           function validateForm() {
+               let valid = true;
+               const errors = [];
+               
+               // Clear previous errors/styles
+               document.querySelectorAll('.error-message').forEach(el => el.remove());
+               document.querySelectorAll('.border-red-500').forEach(el => el.classList.remove('border-red-500'));
+
+               const service = serviceDropdown ? serviceDropdown.value.trim() : '';
+               const quantityVal = quantityInput ? quantityInput.value.trim() : '';
+               const specsVal = specifications ? specifications.value.trim() : '';
+               const deliveryChecked = document.querySelector('input[name="delivery_option"]:checked');
+               const deliveryOption = deliveryChecked ? deliveryChecked.value : '';
+               const addressVal = document.getElementById('delivery_address') ? document.getElementById('delivery_address').value.trim() : '';
+
+               // Debug logs
+               console.log('Validation Debug - Service:', service);
+               console.log('Validation Debug - Quantity:', quantityVal);
+               console.log('Validation Debug - Specs:', specsVal);
+               console.log('Validation Debug - Delivery:', deliveryOption);
+               console.log('Validation Debug - Files length:', fileInput ? fileInput.files.length : 'N/A');
+               console.log('Validation Debug - Color checked:', document.querySelector('input[name="color_option"]:checked')?.value || 'none');
+
+               // Core required fields
+               if (!service) {
+                   errors.push('Service is required.');
+                   if (serviceDropdown) serviceDropdown.classList.add('border-red-500');
+               }
+               if (!quantityVal || parseInt(quantityVal) < 1) {
+                   errors.push('Quantity must be at least 1.');
+                   if (quantityInput) quantityInput.classList.add('border-red-500');
+               }
+               if (!specsVal) {
+                   errors.push('Specifications are required.');
+                   if (specifications) specifications.classList.add('border-red-500');
+               }
+
+               // Delivery
+               if (!deliveryOption) {
+                   errors.push('Please select a delivery option.');
+                   valid = false;
+                   // Highlight radios (add red border to container if needed)
+               } else if (deliveryOption === 'delivery' && !addressVal) {
+                   errors.push('Delivery address is required.');
+                   const addressEl = document.getElementById('delivery_address');
+                   if (addressEl) addressEl.classList.add('border-red-500');
+               }
+
+               // Service-specific
+               if (service) {
+                   const servicesRequiringFile = ['Print', 'Photocopy', 'Photo Development'];
+                   if (servicesRequiringFile.includes(service)) {
+                       if (!fileInput || fileInput.files.length === 0) {
+                           errors.push('Please upload at least one file for this service.');
+                           if (fileInput) fileInput.classList.add('border-red-500');
+                       }
+                   }
+                   if (['Print', 'Photocopy'].includes(service)) {
+                       const paperVal = paperSizeSelect ? paperSizeSelect.value.trim() : '';
+                       if (!paperVal) {
+                           errors.push('Paper size is required.');
+                           if (paperSizeSelect) paperSizeSelect.classList.add('border-red-500');
+                       }
+                       // Color for Print/Scanning
+                       if (service === 'Print' || service === 'Scanning') {
+                           const colorChecked = document.querySelector('input[name="color_option"]:checked');
+                           if (!colorChecked) {
+                               errors.push('Please select a print/scan type.');
+                               valid = false;
+                           }
+                       }
+                   }
+                   if (service === 'Photo Development') {
+                       const photoVal = photoSizeSelect ? photoSizeSelect.value.trim() : '';
+                       if (!photoVal) {
+                           errors.push('Photo size is required.');
+                           if (photoSizeSelect) photoSizeSelect.classList.add('border-red-500');
+                       }
+                   }
+               }
+
+               console.log('Validation Debug - Errors:', errors);
+               console.log('Validation Debug - Overall valid:', errors.length === 0);
+
+               if (errors.length > 0) {
+                   valid = false;
+                   // Show first error as toast, rest in console
+                   showToast(errors[0], true);
+                   // Show all under the submit button or a general div (optional)
+                   const submitBtn = document.getElementById('submitOrder');
+                   if (submitBtn) {
+                       // Remove previous error div
+                       const existingErrorDiv = submitBtn.parentNode.querySelector('.validation-errors');
+                       if (existingErrorDiv) existingErrorDiv.remove();
+                       const errorDiv = document.createElement('div');
+                       errorDiv.className = 'validation-errors bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mt-4';
+                       errorDiv.innerHTML = `<ul class="list-disc list-inside text-sm">${errors.map(err => `<li>${err}</li>`).join('')}</ul>`;
+                       submitBtn.parentNode.insertBefore(errorDiv, submitBtn);
+                   }
+               }
+
+               return valid;
+           }
+
+           // Delivery toggle
+           deliveryRadios.forEach(radio => {
+               radio.addEventListener('change', (e) => {
+                   deliveryAddressGroup.classList.toggle('hidden', e.target.value !== 'delivery');
+                   updateSummary();
+               });
+           });
+
+           // Service change handler for showing/hiding options
+           if (serviceDropdown) {
+               serviceDropdown.addEventListener('change', (e) => {
+                   const serviceName = e.target.value;
+                   // Hide all groups
+                   if (paperSizeGroup) paperSizeGroup.classList.add('hidden');
+                   if (photoSizeGroup) photoSizeGroup.classList.add('hidden');
+                   if (colorOptionGroup) colorOptionGroup.classList.add('hidden');
+                   if (laminationGroup) laminationGroup.classList.add('hidden');
+                   if (paperSizeSelect) paperSizeSelect.value = 'A4';
+                   if (photoSizeSelect) photoSizeSelect.value = 'A4';
+                   colorRadios.forEach(r => r.checked = false);  // Uncheck first
+                   if (addLaminationCheckbox) addLaminationCheckbox.checked = false;
+                   
+                   // NEW: Default to B&W if no color option needed/selected
+                   document.querySelector('input[name="color_option"][value="bw"]').checked = true;
+                   
+                   if (serviceName === 'Print' || serviceName === 'Photocopy') {
+                       if (paperSizeGroup) paperSizeGroup.classList.remove('hidden');
+                       if (laminationGroup) laminationGroup.classList.remove('hidden');
+                       if (serviceName === 'Print') {
+                           if (colorOptionGroup) colorOptionGroup.classList.remove('hidden');
+                           // For Print, default B&W (already set above)
+                       } else {
+                           // Photocopy: Force color
+                           document.querySelector('input[name="color_option"][value="color"]').checked = true;
+                           document.querySelector('input[name="color_option"][value="bw"]').checked = false;
+                       }
+                   } else if (serviceName === 'Photo Development') {
+                       if (photoSizeGroup) photoSizeGroup.classList.remove('hidden');
+                       if (laminationGroup) laminationGroup.classList.remove('hidden');
+                   } else if (serviceName === 'Scanning') {
+                       if (colorOptionGroup) colorOptionGroup.classList.remove('hidden');
+                       // For Scanning, default B&W (already set above)
+                   }
+                   updateSummary();
+               });
+           }
+
+           // Color radios change
+           colorRadios.forEach(radio => {
+               radio.addEventListener('change', updateSummary);
+           });
+
+           // Lamination checkbox change
+           if (addLaminationCheckbox) {
+               addLaminationCheckbox.addEventListener('change', updateSummary);
+           }
+
+           // Paper size change
+           if (paperSizeSelect) {
+               paperSizeSelect.addEventListener('change', updateSummary);
+           }
+
+           // Photo size change
+           if (photoSizeSelect) {
+               photoSizeSelect.addEventListener('change', updateSummary);
+           }
+
+           // Update summary - FIXED: Use photocopying for photocopy
+           function updateSummary() {
+               const serviceName = serviceDropdown ? serviceDropdown.value : '';
+               const serviceLower = serviceName.toLowerCase();
+               const quantity = parseInt(quantityInput ? quantityInput.value : 0) || 1;
+               const delivery = document.querySelector('input[name="delivery_option"]:checked')?.value || 'pickup';
+               const addLamination = addLaminationCheckbox ? addLaminationCheckbox.checked : false;
+               let price = 0;
+               let extra = '';
+               if (serviceLower === 'print') {
+                   const color = document.querySelector('input[name="color_option"]:checked')?.value || 'bw';
+                   const paper = paperSizeSelect ? paperSizeSelect.value : 'A4';
+                   const multipliers = { A4: 1, Short: 1, Long: 1.2 };
+                   price = ((color === 'color' ? window.prices?.print_color || defaultPrices.print_color : window.prices?.print_bw || defaultPrices.print_bw) * (multipliers[paper] || 1));
+                   extra = `, ${paper} (${color === 'color' ? 'Color' : 'B&W'})`;
+                   document.getElementById('summaryPaper').textContent = paper;
+                   document.getElementById('summaryColor').textContent = color === 'color' ? 'Color' : 'B&W';
+               } else if (serviceLower === 'photocopy') {
+                   const paper = paperSizeSelect ? paperSizeSelect.value : 'A4';
+                   const multipliers = { A4: 1, Short: 1, Long: 1.2 };
+                   // FIXED: Use photocopying
+                   price = (window.prices?.photocopying || defaultPrices.photocopying) * (multipliers[paper] || 1);
+                   extra = `, ${paper} (Color)`;
+                   document.getElementById('summaryPaper').textContent = paper;
+                   document.getElementById('summaryColor').textContent = 'Color';
+               } else if (serviceLower === 'scanning') {
+                   const color = document.querySelector('input[name="color_option"]:checked')?.value || 'bw';
+                   price = window.prices?.scanning || defaultPrices.scanning;
+                   extra = ` (${color === 'color' ? 'Color' : 'B&W'})`;
+                   document.getElementById('summaryPaper').textContent = '-';
+                   document.getElementById('summaryColor').textContent = color === 'color' ? 'Color' : 'B&W';
+               } else if (serviceLower === 'photo development') {
+                   const photoSize = photoSizeSelect ? photoSizeSelect.value : 'A4';
+                   price = window.prices?.photo_development || defaultPrices.photo_development;
+                   extra = `, Glossy ${photoSize}`;
+                   document.getElementById('summaryPaper').textContent = `Glossy ${photoSize}`;
+                   document.getElementById('summaryColor').textContent = '-';
+               } else {
+                   const selectedOption = serviceDropdown ? serviceDropdown.options[serviceDropdown.selectedIndex] : null;
+                   price = parseFloat(selectedOption ? selectedOption.dataset.price : 0) || 0;
+               }
+               let total = price * quantity;
+               if (addLamination) {
+                   const lamPrice = window.prices?.laminating || defaultPrices.laminating;
+                   total += lamPrice * quantity;
+                   document.getElementById('summaryLamination').textContent = `Yes (+₱${(lamPrice * quantity).toFixed(2)})`;
+               } else {
+                   document.getElementById('summaryLamination').textContent = 'No';
+               }
+               document.getElementById('summaryService').textContent = serviceName ? serviceName + extra : '-';
+               document.getElementById('summaryQuantity').textContent = quantity;
+               document.getElementById('summaryDelivery').textContent = delivery.charAt(0).toUpperCase() + delivery.slice(1);
+               document.getElementById('summaryPrice').textContent = `₱${total.toFixed(2)}`;
+           }
+
+           if (quantityInput) quantityInput.addEventListener('input', updateSummary);
+
+           // File list
+           if (fileInput && fileList) {
+               fileInput.addEventListener('change', () => {
+                   fileList.innerHTML = Array.from(fileInput.files).map(file => `<div class="text-sm text-gray-600">${file.name}</div>`).join('');
+               });
+           }
+
+           // SUBMIT ORDER (unchanged, but now uses improved validateForm)
+           if (newOrderForm) {
+               newOrderForm.addEventListener('submit', async (e) => {
+                   e.preventDefault();
+
+                   if (!validateForm()) {  // Now more specific!
+                       return;  // No generic toast here—handled inside validateForm
+                   }
+
+                   const formData = new FormData(newOrderForm);
+                   try {
+                       const response = await fetch(`${API_BASE}?action=createOrder`, {
+                           method: 'POST',
+                           body: formData
+                       });
+                       const result = await response.json();
+
+                       if (result.success) {
+                           showToast(`Order placed successfully! Order ID: ${result.data.order_id}`);
+                           newOrderForm.reset();
+                           fileList.innerHTML = '';
+                           // Hide groups
+                           [paperSizeGroup, photoSizeGroup, colorOptionGroup, laminationGroup, deliveryAddressGroup].forEach(group => {
+                               if (group) group.classList.add('hidden');
+                           });
+                           // Remove validation errors
+                           const errorDiv = document.querySelector('.validation-errors');
+                           if (errorDiv) errorDiv.remove();
+                           updateSummary();
+                           showSection('dashboard');
+                           loadDashboardData();
+                       } else {
+                           showToast(result.message || 'Error placing order', true);
+                       }
+                   } catch (error) {
+                       console.error('Submit error:', error);
+                       showToast('Network error: ' + error.message, true);
+                   }
+               });
+           }
+
+           // Orders Section
+           const filterStatus = document.getElementById('filterStatus');
+           const ordersList = document.getElementById('ordersList');
+           async function loadOrders(status = '') {
+               const url = status ? `${API_BASE}?action=getOrders&status=${status}` : `${API_BASE}?action=getOrders`;
+               try {
+                   const response = await fetch(url);
+                   const result = await response.json();
+                   if (result.success && ordersList) {
+                       ordersList.innerHTML = result.data.orders.length === 0
+                           ? '<p class="p-6 text-center text-gray-500">No orders found</p>'
+                           : result.data.orders.map(order => {
+                               const specsPreview = order.specifications.length > 100 ? order.specifications.substring(0, 100) + '...' : order.specifications;
+                               const statusClass = order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+                               let specsEsc = order.specifications
+                                   .replace(/\\/g, '\\\\')
+                                   .replace(/'/g, "\\'")
+                                   .replace(/\n/g, '\\n');
+                               let serviceEsc = order.service
+                                   .replace(/\\/g, '\\\\')
+                                   .replace(/'/g, "\\'");
+                               let addressEsc = (order.delivery_address || '')
+                                   .replace(/\\/g, '\\\\')
+                                   .replace(/'/g, "\\'")
+                                   .replace(/\n/g, '\\n');
+                               let deliveryOptionEsc = order.delivery_option
+                                   .replace(/\\/g, '\\\\')
+                                   .replace(/'/g, "\\'");
+                               const editBtn = order.status === 'pending' ? `
+                                   <button class="edit-btn mt-2 text-primary-600 hover:text-primary-800 text-sm" onclick="editOrder(${order.order_id}, '${serviceEsc}', ${order.quantity}, '${specsEsc}', '${order.status}', '${addressEsc}', '${deliveryOptionEsc}')">Edit</button>
+                               ` : '';
+                               return `
+                                   <div class="p-6 border-b last:border-b-0 hover:bg-gray-50">
+                                       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                           <div class="w-full sm:w-auto">
+                                               <h4 class="font-semibold text-gray-900">#${order.order_id} - ${order.service}</h4>
+                                               <p class="text-sm text-gray-600 mt-1">${specsPreview}</p>
+                                               <div class="text-sm text-gray-500 mt-1">Qty: ${order.quantity} | Total: ₱${parseFloat(order.total_amount || 0).toFixed(2)}</div>
+                                           </div>
+                                           <div class="text-right w-full sm:w-auto">
+                                               <span class="inline-block px-2 py-1 text-xs font-semibold rounded-full ${statusClass}">${order.status}</span>
+                                               <p class="text-sm text-gray-500 mt-1">${new Date(order.created_at).toLocaleDateString()}</p>
+                                               ${editBtn}
+                                           </div>
+                                       </div>
+                                   </div>
+                               `;
+                           }).join('');
+                   } else if (ordersList) {
+                       ordersList.innerHTML = '<p class="p-6 text-center text-red-500">Error loading orders</p>';
+                   }
+               } catch (error) {
+                   console.error('Error:', error);
+                   if (ordersList) ordersList.innerHTML = '<p class="p-6 text-center text-red-500">Error loading orders</p>';
+               }
+           }
+           if (filterStatus) filterStatus.addEventListener('change', () => loadOrders(filterStatus.value));
+
+           // Edit Order
+           window.editOrder = function(id, service, quantity, specs, status, delivery_address, delivery_option) {
+               const editOrderIdEl = document.getElementById('editOrderId');
+               const editServiceEl = document.getElementById('editService');
+               const editQuantityEl = document.getElementById('editQuantity');
+               const editSpecificationsEl = document.getElementById('editSpecifications');
+               const editAddressEl = document.getElementById('editAddress');
+               const editOrderModalEl = document.getElementById('editOrderModal');
+               if (editOrderIdEl) editOrderIdEl.value = id;
+               if (editServiceEl) editServiceEl.value = service;
+               if (editQuantityEl) editQuantityEl.value = quantity;
+               if (editSpecificationsEl) editSpecificationsEl.value = specs.replace(/\\n/g, '\n');
+               if (editAddressEl) editAddressEl.value = delivery_address.replace(/\\n/g, '\n');
+               // Set delivery option
+               const editDeliveryRadios = document.querySelectorAll('#editOrderForm input[name="delivery_option"]');
+               editDeliveryRadios.forEach(r => r.checked = false);
+               const selectedDeliveryRadio = document.querySelector(`#editOrderForm input[name="delivery_option"][value="${delivery_option}"]`);
+               if (selectedDeliveryRadio) selectedDeliveryRadio.checked = true;
+               const editDeliveryAddressGroup = document.getElementById('editDeliveryAddressGroup');
+               if (editDeliveryAddressGroup) {
+                   editDeliveryAddressGroup.classList.toggle('hidden', delivery_option !== 'delivery');
+               }
+               // Defaults for new options
+               if (document.getElementById('edit_paper_size')) document.getElementById('edit_paper_size').value = 'A4';
+               if (document.getElementById('edit_photo_size')) document.getElementById('edit_photo_size').value = 'A4';
+               const editColorBw = document.querySelector('#editOrderForm input[name="color_option"][value="bw"]');
+               if (editColorBw) editColorBw.checked = true;
+               const editLaminationCheckbox = document.getElementById('editAddLamination');
+               if (editLaminationCheckbox) editLaminationCheckbox.checked = false;
+               // Toggle groups based on service
+               const editPaperGroup = document.getElementById('editPaperSizeGroup');
+               const editPhotoGroup = document.getElementById('editPhotoSizeGroup');
+               const editColorGroup = document.getElementById('editColorOptionGroup');
+               const editLaminationGroup = document.getElementById('editLaminationGroup');
+               if (editPaperGroup) editPaperGroup.classList.add('hidden');
+               if (editPhotoGroup) editPhotoGroup.classList.add('hidden');
+               if (editColorGroup) editColorGroup.classList.add('hidden');
+               if (editLaminationGroup) editLaminationGroup.classList.add('hidden');
+               if (service === 'Print' || service === 'Photocopy') {
+                   if (editPaperGroup) editPaperGroup.classList.remove('hidden');
+                   if (editLaminationGroup) editLaminationGroup.classList.remove('hidden');
+                   if (service === 'Print') {
+                       if (editColorGroup) editColorGroup.classList.remove('hidden');
+                   } else {
+                       const editColorColor = document.querySelector('#editOrderForm input[name="color_option"][value="color"]');
+                       if (editColorColor) editColorColor.checked = true;
+                   }
+               } else if (service === 'Photo Development') {
+                   if (editPhotoGroup) editPhotoGroup.classList.remove('hidden');
+                   if (editLaminationGroup) editLaminationGroup.classList.remove('hidden');
+               } else if (service === 'Scanning') {
+                   if (editColorGroup) editColorGroup.classList.remove('hidden');
+               }
+               // Parse specs to restore options
+               const lines = specs.replace(/\\n/g, '\n').split('\n');
+               for (let line of lines) {
+                   line = line.trim();
+                   if (line.startsWith('Paper Size:')) {
+                       const size = line.split(':')[1].trim();
+                       const paperEl = document.getElementById('edit_paper_size');
+                       if (paperEl) paperEl.value = size;
+                   } else if (line.startsWith('Print Type:') || line.startsWith('Scan Type:')) {
+                       const type = line.split(':')[1].trim();
+                       const color = type.includes('Color') ? 'color' : 'bw';
+                       const radio = document.querySelector(`#editOrderForm input[name="color_option"][value="${color}"]`);
+                       if (radio) radio.checked = true;
+                   } else if (line.startsWith('Copy Type:')) {
+                       // Photocopy is always color
+                       const radio = document.querySelector(`#editOrderForm input[name="color_option"][value="color"]`);
+                       if (radio) radio.checked = true;
+                   } else if (line.startsWith('Photo Size:')) {
+                       const size = line.split(':')[1].trim().replace('Glossy ', '');
+                       const photoEl = document.getElementById('edit_photo_size');
+                       if (photoEl) photoEl.value = size;
+                   } else if (line.includes('Add Lamination: Yes')) {
+                       const cb = document.getElementById('editAddLamination');
+                       if (cb) cb.checked = true;
+                   }
+               }
+               if (editServiceEl) editServiceEl.dispatchEvent(new Event('change'));
+               if (editOrderModalEl) editOrderModalEl.classList.remove('hidden');
+           };
+
+           const closeEditModal = document.getElementById('closeEditModal');
+           if (closeEditModal) closeEditModal.addEventListener('click', () => {
+               const editOrderModalEl = document.getElementById('editOrderModal');
+               if (editOrderModalEl) editOrderModalEl.classList.add('hidden');
+           });
+
+           // Edit delivery toggle
+           const editDeliveryRadios = document.querySelectorAll('#editOrderForm input[name="delivery_option"]');
+           const editDeliveryAddressGroup = document.getElementById('editDeliveryAddressGroup');
+           editDeliveryRadios.forEach(radio => {
+               radio.addEventListener('change', (e) => {
+                   if (editDeliveryAddressGroup) {
+                       editDeliveryAddressGroup.classList.toggle('hidden', e.target.value !== 'delivery');
+                   }
+               });
+           });
+
+           // Edit service change
+           const editServiceSelect = document.getElementById('editService');
+           if (editServiceSelect) {
+               editServiceSelect.addEventListener('change', (e) => {
+                   const service = e.target.value;
+                   const editPaperGroup = document.getElementById('editPaperSizeGroup');
+                   const editPhotoGroup = document.getElementById('editPhotoSizeGroup');
+                   const editColorGroup = document.getElementById('editColorOptionGroup');
+                   const editLaminationGroup = document.getElementById('editLaminationGroup');
+                   // Hide all
+                   if (editPaperGroup) editPaperGroup.classList.add('hidden');
+                   if (editPhotoGroup) editPhotoGroup.classList.add('hidden');
+                   if (editColorGroup) editColorGroup.classList.add('hidden');
+                   if (editLaminationGroup) editLaminationGroup.classList.add('hidden');
+                   if (document.getElementById('edit_paper_size')) document.getElementById('edit_paper_size').value = 'A4';
+                   if (document.getElementById('edit_photo_size')) document.getElementById('edit_photo_size').value = 'A4';
+                   const editColorBw = document.querySelector('#editOrderForm input[name="color_option"][value="bw"]');
+                   if (editColorBw) editColorBw.checked = true;
+                   const editLaminationCheckbox = document.getElementById('editAddLamination');
+                   if (editLaminationCheckbox) editLaminationCheckbox.checked = false;
+                   if (service === 'Print' || service === 'Photocopy') {
+                       if (editPaperGroup) editPaperGroup.classList.remove('hidden');
+                       if (editLaminationGroup) editLaminationGroup.classList.remove('hidden');
+                       if (service === 'Print') {
+                           if (editColorGroup) editColorGroup.classList.remove('hidden');
+                       } else {
+                           const editColorColor = document.querySelector('#editOrderForm input[name="color_option"][value="color"]');
+                           if (editColorColor) editColorColor.checked = true;
+                       }
+                   } else if (service === 'Photo Development') {
+                       if (editPhotoGroup) editPhotoGroup.classList.remove('hidden');
+                       if (editLaminationGroup) editLaminationGroup.classList.remove('hidden');
+                   } else if (service === 'Scanning') {
+                       if (editColorGroup) editColorGroup.classList.remove('hidden');
+                   }
+               });
+           }
+
+           const editOrderForm = document.getElementById('editOrderForm');
+           if (editOrderForm) {
+               editOrderForm.addEventListener('submit', async (e) => {
+                   e.preventDefault();
+                   const formData = new FormData(e.target);
+                   try {
+                       const response = await fetch(`${API_BASE}?action=updateOrder`, {
+                           method: 'POST',
+                           body: formData
+                       });
+                       const result = await response.json();
+                       if (result.success) {
+                           let msg = 'Order updated successfully!';
+                           if (result.data.replaced_files) {
+                               msg += ' Files have been replaced.';
+                           }
+                           showToast(msg);
+                           const editOrderModalEl = document.getElementById('editOrderModal');
+                           if (editOrderModalEl) editOrderModalEl.classList.add('hidden');
+                           loadOrders(document.getElementById('filterStatus')?.value || '');
+                           loadDashboardData();
+                       } else {
+                           showToast(result.message, true);
+                       }
+                   } catch (error) {
+                       showToast('Error: ' + error.message, true);
+                   }
+               });
+           }
+
+           // Periodic polling for price updates (reduced to 10s for faster sync)
+           setInterval(() => {
+               refreshPrices();
+           }, 10000);
+       </script>
+       <script>
+   // ----- PROFILE UPDATE TOAST (runs on every page load) -----
+   document.addEventListener('DOMContentLoaded', function () {
+       <?php if (isset($_SESSION['toast_message'])): ?>
+           const msg  = <?= json_encode($_SESSION['toast_message']) ?>;
+           const type = <?= json_encode($_SESSION['toast_type'] ?? 'success') ?>;
+           showToast(msg, type === 'error');
+           <?php
+           unset($_SESSION['toast_message']);
+           unset($_SESSION['toast_type']);
+           ?>
+       <?php endif; ?>
+   });
+
+</script>
+<script>
+   // Toggle password visibility
+   function togglePassword(button, inputId) {
+       const input = document.getElementById(inputId);
+       const icon = button.querySelector('i');
+       if (input.type === 'password') {
+           input.type = 'text';
+           icon.classList.replace('fa-eye', 'fa-eye-slash');
+       } else {
+           input.type = 'password';
+           icon.classList.replace('fa-eye-slash', 'fa-eye');
+       }
+   }
+</script>
+   </body>
+   </html>
