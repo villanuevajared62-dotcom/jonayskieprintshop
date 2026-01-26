@@ -1,4 +1,4 @@
-    <?php
+<?php
     // admin.php - SECURE ADMIN DASHBOARD WITH ENHANCED SECURITY AND DATA ACCURACY
     session_name('admin_session');
     if (session_status() === PHP_SESSION_NONE) {
@@ -8,7 +8,6 @@
         try {
             require_once 'config.php';
             $pdo = getDBConnection();
-
             $stmt = $pdo->prepare("
                 SELECT
                     d.order_id,
@@ -22,10 +21,8 @@
                 LEFT JOIN users u ON d.user_id = u.id
                 ORDER BY d.deleted_at DESC
             ");
-
             $stmt->execute();
             $deletedOrders = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
             sendJson(['success' => true, 'orders' => $deletedOrders]);
         } catch (PDOException $e) {
             sendJson(['success' => false, 'error' => $e->getMessage()]);
@@ -111,14 +108,11 @@
             ");
             $stmt->execute();
             $notifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
             $unreadCount = $pdo->query("SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'pending' AND is_deleted = 0")->fetchColumn();
-
             foreach ($notifications as &$notif) {
                 $notif['message'] = "New order from {$notif['customer_name']}: {$notif['quantity']} x {$notif['service']} - " . date('M j, Y g:i A', strtotime($notif['notification_time']));
             }
             unset($notif);
-
             sendJson([
                 'success' => true,
                 'notifications' => $notifications,
@@ -157,47 +151,22 @@
     if (isset($_GET['action']) && $_GET['action'] === 'dashboard_stats') {
         try {
             $totalRevenueStmt = $pdo->prepare("
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                        WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                        WHEN LOWER(o.service) = 'print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                        WHEN LOWER(o.service) = 'photocopy' THEN o.quantity * p.photocopying
-                        WHEN LOWER(o.service) = 'scanning' THEN o.quantity * p.scanning
-                        WHEN LOWER(o.service) = 'photo-development' THEN o.quantity * p.photo_development
-                        WHEN LOWER(o.service) = 'laminating' THEN o.quantity * p.laminating
-                        ELSE 0
-                    END), 0) AS total_revenue
+                SELECT COALESCE(SUM(o.total_amount), 0) AS total_revenue
                 FROM orders o
-                LEFT JOIN pricing p ON p.id = 1
                 WHERE LOWER(o.status) = 'completed' AND o.is_deleted = 0
             ");
             $totalRevenueStmt->execute();
             $totalRevenue = $totalRevenueStmt->fetchColumn();
-
             $todayRevenueStmt = $pdo->prepare("
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                        WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                        WHEN LOWER(o.service) = 'print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                        WHEN LOWER(o.service) = 'photocopy' THEN o.quantity * p.photocopying
-                        WHEN LOWER(o.service) = 'scanning' THEN o.quantity * p.scanning
-                        WHEN LOWER(o.service) = 'photo-development' THEN o.quantity * p.photo_development
-                        WHEN LOWER(o.service) = 'laminating' THEN o.quantity * p.laminating
-                        ELSE 0
-                    END), 0) AS today_revenue
+                SELECT COALESCE(SUM(o.total_amount), 0) AS today_revenue
                 FROM orders o
-                LEFT JOIN pricing p ON p.id = 1
                 WHERE LOWER(o.status) = 'completed' AND DATE(o.created_at) = CURDATE() AND o.is_deleted = 0
             ");
             $todayRevenueStmt->execute();
             $todayRevenue = $todayRevenueStmt->fetchColumn();
-
             $totalOrders = $pdo->query("SELECT COUNT(*) FROM orders WHERE is_deleted = 0")->fetchColumn();
             $pendingOrders = $pdo->query("SELECT COUNT(*) FROM orders WHERE LOWER(status) = 'pending' AND is_deleted = 0")->fetchColumn();
             $totalCustomers = $pdo->query("SELECT COUNT(DISTINCT id) FROM users WHERE LOWER(role) = 'customer'")->fetchColumn();
-
             sendJson([
                 'totalOrders' => (int)$totalOrders,
                 'pendingOrders' => (int)$pendingOrders,
@@ -222,27 +191,16 @@
                     o.status,
                     o.specifications,
                     o.created_at AS order_date,
-                    CASE 
-                        WHEN o.delivery_address IS NULL OR o.delivery_address = '' OR TRIM(o.delivery_address) = '' 
-                        THEN 'PICKUP' 
-                        ELSE o.delivery_address 
+                    CASE
+                        WHEN o.delivery_address IS NULL OR o.delivery_address = '' OR TRIM(o.delivery_address) = ''
+                        THEN 'PICKUP'
+                        ELSE o.delivery_address
                     END AS address,
-                    COALESCE(
-                        CASE
-                            WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                            WHEN LOWER(o.service) = 'print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                            WHEN LOWER(o.service) = 'print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                            WHEN LOWER(o.service) = 'photocopy' THEN o.quantity * p.photocopying
-                            WHEN LOWER(o.service) = 'scanning' THEN o.quantity * p.scanning
-                            WHEN LOWER(o.service) = 'photo-development' THEN o.quantity * p.photo_development
-                            WHEN LOWER(o.service) = 'laminating' THEN o.quantity * p.laminating
-                            ELSE 0
-                        END, 0) AS amount,
+                    o.total_amount AS amount,
                     GROUP_CONCAT(f.filepath) AS files
                 FROM orders o
                 LEFT JOIN users u ON o.user_id = u.id
                 LEFT JOIN order_files f ON o.id = f.order_id
-                LEFT JOIN pricing p ON p.id = 1
                 WHERE o.is_deleted = 0
             ";
             if ($status) $query .= " AND LOWER(o.status) = :status";
@@ -283,7 +241,6 @@
             ");
             $stmt->execute();
             $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
             sendJson($customers);
         } catch (PDOException $e) {
             sendJson(['error' => $e->getMessage()]);
@@ -312,14 +269,12 @@
     if (isset($_POST['action']) && $_POST['action'] === 'delete_order') {
         try {
             $order_id = (int)($_POST['order_id'] ?? 0);
-            
+        
             error_log("🗑️ Archive attempt received: order_id = " . $order_id . " (from POST: " . json_encode($_POST) . ")");
-
             if (!$order_id) {
                 error_log("❌ Archive failed: Invalid order_id (0 or missing)");
                 sendJson(['success' => false, 'error' => 'Missing or invalid order ID']);
             }
-
             $checkStmt = $pdo->prepare("SELECT id, is_deleted, user_id, service, quantity, status, created_at FROM orders WHERE id = ?");
             $checkStmt->execute([$order_id]);
             $existingOrder = $checkStmt->fetch(PDO::FETCH_ASSOC);
@@ -327,13 +282,10 @@
                 error_log("❌ Archive failed: Order {$order_id} not found or already deleted");
                 sendJson(['success' => false, 'error' => 'Order not found or already deleted']);
             }
-
             error_log("✅ Proceeding to archive order {$order_id}");
-
             $pdo->beginTransaction();
-
             $insertStmt = $pdo->prepare("
-                INSERT INTO deleted_orders (order_id, user_id, service, quantity, status, created_at, deleted_at) 
+                INSERT INTO deleted_orders (order_id, user_id, service, quantity, status, created_at, deleted_at)
                 VALUES (?, ?, ?, ?, ?, ?, NOW())
             ");
             $insertStmt->execute([
@@ -344,10 +296,8 @@
                 $existingOrder['status'],
                 $existingOrder['created_at']
             ]);
-
             $stmt = $pdo->prepare("DELETE FROM order_files WHERE order_id = ?");
             $stmt->execute([$order_id]);
-
             $uploadDir = __DIR__ . "/uploads/orders/{$order_id}/";
             if (is_dir($uploadDir)) {
                 $files = glob($uploadDir . '*');
@@ -368,13 +318,11 @@
             } else {
                 error_log("Directory not found (normal if no files): " . $uploadDir);
             }
-
             $stmt = $pdo->prepare("DELETE FROM orders WHERE id = ? AND is_deleted = 0");
             $stmt->execute([$order_id]);
             if ($stmt->rowCount() === 0) {
                 throw new Exception('No active order found to delete (possible race condition)');
             }
-
             $pdo->commit();
             error_log("✅ Order {$order_id} archived to deleted_orders successfully");
             sendJson(['success' => true, 'message' => 'Order moved to deleted transactions successfully']);
@@ -404,7 +352,6 @@
                     last_updated = NOW()
                 WHERE id = 1
             ");
-
             $stmt->execute([
                 ':print_bw' => $printBw,
                 ':print_color' => $printColor,
@@ -428,14 +375,14 @@
     if (isset($_GET['action']) && $_GET['action'] === 'load_pricing') {
         try {
             $stmt = $pdo->prepare("
-                SELECT 
+                SELECT
                     print_bw AS `print_bw`,
                     print_color AS `print_color`,
                     photocopying AS photocopy,
                     scanning AS scanning,
                     photo_development AS `photo-development`,
                     laminating AS laminating
-                FROM pricing 
+                FROM pricing
                 WHERE id = 1
             ");
             $stmt->execute();
@@ -456,10 +403,8 @@
         try {
             $reportType = $_GET['report_type'] ?? 'daily';
             $reportDate = $_GET['report_date'] ?? date('Y-m-d');
-
             $dateCondition = '';
             $params = [':date' => $reportDate];
-
             switch($reportType) {
                 case 'daily':
                     $dateCondition = "DATE(created_at) = :date AND is_deleted = 0";
@@ -473,40 +418,23 @@
                 default:
                     $dateCondition = "DATE(created_at) = :date AND is_deleted = 0";
             }
-
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE $dateCondition");
             $stmt->execute($params);
             $totalOrders = $stmt->fetchColumn();
-
             $stmt = $pdo->prepare("
-                SELECT COALESCE(SUM(
-                    CASE
-                        WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                        WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                        WHEN LOWER(o.service)='print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                        WHEN LOWER(o.service)='photocopy' THEN o.quantity * p.photocopying
-                        WHEN LOWER(o.service)='scanning' THEN o.quantity * p.scanning
-                        WHEN LOWER(o.service)='photo-development' THEN o.quantity * p.photo_development
-                        WHEN LOWER(o.service)='laminating' THEN o.quantity * p.laminating
-                        ELSE 0
-                    END), 0) AS total_revenue
+                SELECT COALESCE(SUM(o.total_amount), 0) AS total_revenue
                 FROM orders o
-                LEFT JOIN pricing p ON p.id = 1
                 WHERE LOWER(o.status) = 'completed' AND $dateCondition
             ");
             $stmt->execute($params);
             $totalRevenue = $stmt->fetchColumn();
-
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM users WHERE LOWER(role)='customer' AND DATE(created_at) = :date");
             $stmt->execute($params);
             $newCustomers = $stmt->fetchColumn();
-
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM orders WHERE LOWER(status)='completed' AND $dateCondition");
             $stmt->execute($params);
             $completedOrders = $stmt->fetchColumn();
-
             $completionRate = $totalOrders > 0 ? round(($completedOrders / $totalOrders) * 100, 1) : 0;
-
             sendJson([
                 'success' => true,
                 'totalOrders' => (int)$totalOrders,
@@ -522,35 +450,20 @@
         try {
             $reportType = $_GET['report_type'] ?? 'daily';
             $reportDate = $_GET['report_date'] ?? date('Y-m-d');
-
             $labels = [];
             $revenueData = [];
             $ordersData = [];
-
             if ($reportType === 'daily') {
                 for ($hour = 0; $hour < 24; $hour++) {
                     $labels[] = sprintf('%02d:00', $hour);
-
                     $stmt = $pdo->prepare("
-                        SELECT COALESCE(SUM(
-                            CASE
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                                WHEN LOWER(o.service)='print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                                WHEN LOWER(o.service)='photocopy' THEN o.quantity * p.photocopying
-                                WHEN LOWER(o.service)='scanning' THEN o.quantity * p.scanning
-                                WHEN LOWER(o.service)='photo-development' THEN o.quantity * p.photo_development
-                                WHEN LOWER(o.service)='laminating' THEN o.quantity * p.laminating
-                                ELSE 0
-                            END), 0)
+                        SELECT COALESCE(SUM(o.total_amount), 0)
                         FROM orders o
-                        LEFT JOIN pricing p ON p.id = 1
                         WHERE DATE(o.created_at) = :date AND HOUR(o.created_at) = :hour AND LOWER(o.status) = 'completed' AND o.is_deleted = 0
                     ");
                     $stmt->execute([':date' => $reportDate, ':hour' => $hour]);
                     $revenueResult = $stmt->fetchColumn();
                     $revenueData[] = (float)($revenueResult ?? 0);
-
                     $stmt = $pdo->prepare("
                         SELECT COUNT(*)
                         FROM orders
@@ -562,32 +475,18 @@
             } elseif ($reportType === 'weekly') {
                 $days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                 $labels = $days;
-
                 for ($i = 0; $i < 7; $i++) {
                     $dayOfWeek = ($i + 2) % 7;
                     if ($dayOfWeek === 0) $dayOfWeek = 7;
-
                     $stmt = $pdo->prepare("
-                        SELECT COALESCE(SUM(
-                            CASE
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                                WHEN LOWER(o.service)='print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                                WHEN LOWER(o.service)='photocopy' THEN o.quantity * p.photocopying
-                                WHEN LOWER(o.service)='scanning' THEN o.quantity * p.scanning
-                                WHEN LOWER(o.service)='photo-development' THEN o.quantity * p.photo_development
-                                WHEN LOWER(o.service)='laminating' THEN o.quantity * p.laminating
-                                ELSE 0
-                            END), 0)
+                        SELECT COALESCE(SUM(o.total_amount), 0)
                         FROM orders o
-                        LEFT JOIN pricing p ON p.id = 1
                         WHERE YEARWEEK(o.created_at, 1) = YEARWEEK(:date, 1)
                         AND DAYOFWEEK(o.created_at) = :dayofweek AND LOWER(o.status) = 'completed' AND o.is_deleted = 0
                     ");
                     $stmt->execute([':date' => $reportDate, ':dayofweek' => $dayOfWeek]);
                     $revenueResult = $stmt->fetchColumn();
                     $revenueData[] = (float)($revenueResult ?? 0);
-
                     $stmt = $pdo->prepare("
                         SELECT COUNT(*)
                         FROM orders
@@ -601,32 +500,17 @@
                 $daysInMonth = date('t', strtotime($reportDate));
                 $year = date('Y', strtotime($reportDate));
                 $month = date('m', strtotime($reportDate));
-
                 for ($day = 1; $day <= $daysInMonth; $day++) {
                     $labels[] = (string)$day;
-
                     $currentDate = sprintf('%s-%s-%02d', $year, $month, $day);
-
                     $stmt = $pdo->prepare("
-                        SELECT COALESCE(SUM(
-                            CASE
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%black and white%' OR LOWER(o.specifications) LIKE '%bw%' OR LOWER(o.specifications) LIKE '%monochrome%' OR LOWER(o.specifications) LIKE '%black & white%') THEN o.quantity * p.print_bw
-                                WHEN LOWER(o.service)='print' AND (LOWER(o.specifications) LIKE '%color%' OR LOWER(o.specifications) LIKE '%coloured%') THEN o.quantity * p.print_color
-                                WHEN LOWER(o.service)='print' THEN o.quantity * COALESCE(p.print_bw, p.document_printing)
-                                WHEN LOWER(o.service)='photocopy' THEN o.quantity * p.photocopying
-                                WHEN LOWER(o.service)='scanning' THEN o.quantity * p.scanning
-                                WHEN LOWER(o.service)='photo-development' THEN o.quantity * p.photo_development
-                                WHEN LOWER(o.service)='laminating' THEN o.quantity * p.laminating
-                                ELSE 0
-                            END), 0)
+                        SELECT COALESCE(SUM(o.total_amount), 0)
                         FROM orders o
-                        LEFT JOIN pricing p ON p.id = 1
                         WHERE DATE(o.created_at) = :date AND LOWER(o.status) = 'completed' AND o.is_deleted = 0
                     ");
                     $stmt->execute([':date' => $currentDate]);
                     $revenueResult = $stmt->fetchColumn();
                     $revenueData[] = (float)($revenueResult ?? 0);
-
                     $stmt = $pdo->prepare("
                         SELECT COUNT(*)
                         FROM orders
@@ -636,7 +520,6 @@
                     $ordersData[] = (int)$stmt->fetchColumn();
                 }
             }
-
             sendJson([
                 'success' => true,
                 'labels' => $labels,
@@ -656,13 +539,10 @@
         <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
         <meta http-equiv="Pragma" content="no-cache">
         <meta http-equiv="Expires" content="0">
-
         <title>Admin Dashboard - Jonayskie Prints</title>
-
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
         <script src="https://cdn.tailwindcss.com"></script>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
         <script>
             tailwind.config = {
                 theme: {
@@ -684,7 +564,6 @@
                 box-shadow: 0 10px 30px rgba(0,0,0,0.2);
                 color: white;
             }
-
             .price-board-header {
                 display: flex;
                 justify-content: space-between;
@@ -693,7 +572,6 @@
                 border-bottom: 2px solid rgba(255,255,255,0.3);
                 padding-bottom: 15px;
             }
-
             .price-board-header h2 {
                 margin: 0;
                 font-size: 24px;
@@ -701,11 +579,9 @@
                 align-items: center;
                 gap: 10px;
             }
-
             .price-board-header i {
                 font-size: 28px;
             }
-
             .price-update-badge {
                 background: rgba(255,255,255,0.2);
                 padding: 5px 12px;
@@ -715,13 +591,11 @@
                 align-items: center;
                 gap: 5px;
             }
-
             .price-items {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
                 gap: 15px;
             }
-
             .price-item {
                 background: rgba(255,255,255,0.15);
                 backdrop-filter: blur(10px);
@@ -730,19 +604,16 @@
                 transition: transform 0.3s ease, background 0.3s ease;
                 border: 1px solid rgba(255,255,255,0.2);
             }
-
             .price-item:hover {
                 transform: translateY(-5px);
                 background: rgba(255,255,255,0.25);
             }
-
             .price-item-header {
                 display: flex;
                 align-items: center;
                 gap: 10px;
                 margin-bottom: 10px;
             }
-
             .price-item-icon {
                 width: 40px;
                 height: 40px;
@@ -753,38 +624,31 @@
                 justify-content: center;
                 font-size: 18px;
             }
-
             .price-item-name {
                 font-weight: 600;
                 font-size: 16px;
             }
-
             .price-item-price {
                 font-size: 28px;
                 font-weight: bold;
                 margin: 5px 0;
             }
-
             .price-item-unit {
                 font-size: 12px;
                 opacity: 0.8;
             }
-
             .price-loading {
                 text-align: center;
                 padding: 20px;
                 opacity: 0.8;
             }
-
             @keyframes pulse {
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.6; }
             }
-
             .price-updating {
                 animation: pulse 1.5s ease-in-out infinite;
             }
-
             @keyframes slideIn {
                 from {
                     transform: translateX(100%);
@@ -795,36 +659,30 @@
                     opacity: 1;
                 }
             }
-
             .stat-card {
                 background: rgba(255,255,255,0.15);
                 backdrop-filter: blur(10px);
                 border: 1px solid rgba(255,255,255,0.2);
                 transition: transform 0.3s ease;
             }
-
             .stat-card:hover {
                 transform: translateY(-5px);
                 background: rgba(255,255,255,0.25);
             }
-
             .stat-icon {
                 background: rgba(255,255,255,0.2);
                 border-radius: 50%;
             }
-
             @media (max-width: 768px) {
                 .price-items {
                     grid-template-columns: 1fr;
                 }
-
                 .price-board-header {
                     flex-direction: column;
                     align-items: flex-start;
                     gap: 10px;
                 }
             }
-
             .dashboard-header {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
@@ -834,25 +692,20 @@
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                 transition: background 0.3s ease, box-shadow 0.3s ease;
             }
-
             .dashboard-header.scrolled {
                 background: #667eea;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.2);
             }
-
             .sidebar {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
             }
-
             .nav-link:hover {
                 background: rgba(255,255,255,0.1);
             }
-
             .nav-link.active {
                 background: rgba(255,255,255,0.2);
             }
-
             .orders-table th,
             .orders-table td {
                 white-space: nowrap;
@@ -861,37 +714,31 @@
                 padding: 0.5rem 0.75rem;
                 font-size: 0.75rem;
             }
-
             .files-cell {
                 max-width: 80px;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-
             .specs-cell {
                 max-width: 120px;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-
             .address-cell {
                 max-width: 80px;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-
             .customer-cell {
                 max-width: 100px;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-
             .service-cell {
                 max-width: 60px;
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-
             .notification-dropdown {
                 position: absolute;
                 top: 100%;
@@ -906,12 +753,10 @@
                 max-h-96;
                 overflow-y-auto;
             }
-
             .action-btn {
                 font-size: 0.7rem;
                 padding: 0.25rem 0.5rem;
             }
-
             @media (max-width: 768px) {
                 .orders-table table,
                 .orders-table thead,
@@ -922,11 +767,9 @@
                     display: block;
                     width: 100%;
                 }
-
                 .orders-table thead tr {
                     display: none;
                 }
-
                 .orders-table tr {
                     margin-bottom: 1rem;
                     background: #fff;
@@ -935,7 +778,6 @@
                     padding: 0.5rem;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                 }
-
                 .orders-table td {
                     display: flex;
                     justify-content: space-between;
@@ -947,7 +789,6 @@
                     border-bottom: 1px solid #eee;
                     position: relative;
                 }
-
                 .orders-table td::before {
                     content: attr(data-label) ": ";
                     font-weight: 600;
@@ -960,44 +801,36 @@
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
-
                 .orders-table td:last-child {
                     border-bottom: none;
                 }
-
                 .orders-table .status-cell {
                     justify-content: flex-start;
                 }
-
                 .orders-table .status-cell::before {
                     flex: none;
                     margin-right: 0.5rem;
                 }
-
                 .orders-table .action-cell {
                     flex-direction: column;
                     gap: 0.5rem;
                     align-items: stretch;
                 }
-
                 .orders-table .action-cell::before {
                     display: none;
                 }
-
                 .orders-table .delete-cell {
                     background: #fee2e2;
                     border-radius: 0 0 0.5rem 0.5rem;
                     padding: 1rem;
                     margin-top: 0.5rem;
                 }
-
                 .orders-table .delete-cell::before {
                     display: block;
                     font-weight: bold;
                     color: #dc2626;
                     margin-bottom: 0.5rem;
                 }
-
                 .orders-table .view-specs-btn,
                 .orders-table .status-select,
                 .orders-table .delete-btn {
@@ -1005,7 +838,6 @@
                     text-align: center;
                 }
             }
-
             .view-specs-btn {
                 font-size: 0.75rem;
                 padding: 0.25rem 0.5rem;
@@ -1016,51 +848,41 @@
                 cursor: pointer;
                 transition: all 0.2s;
             }
-
             .view-specs-btn:hover {
                 background: #007bff;
                 color: white;
             }
-
             #specsModal .modal-content {
                 max-height: 80vh;
                 overflow-y: auto;
             }
-
             @media (max-width: 768px) {
                 #specsModal .grid-cols-3 {
                     grid-template-columns: 1fr;
                 }
             }
-
             #customers-section {
                 animation: fadeIn 0.4s ease-in-out;
             }
-
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(10px); }
                 to { opacity: 1; transform: translateY(0); }
             }
-
             #customersTable td {
                 padding: 0.75rem 1rem;
             }
-
             #customersTable tr:hover {
                 background-color: #f9fafb;
                 transition: background 0.3s ease;
             }
-
             @media (max-width: 768px) {
                 .customers-table thead {
                     display: none;
                 }
-
                 #customersTable {
                     border-collapse: separate;
                     border-spacing: 0 1rem;
                 }
-
                 #customersTable tr {
                     display: block;
                     background: #ffffff;
@@ -1070,7 +892,6 @@
                     margin-bottom: 1rem;
                     border-left: 5px solid #3b82f6;
                 }
-
                 #customersTable td {
                     display: flex;
                     justify-content: space-between;
@@ -1078,24 +899,20 @@
                     font-size: 0.9rem;
                     color: #374151;
                 }
-
                 #customersTable td::before {
                     content: attr(data-label);
                     font-weight: 600;
                     color: #2563eb;
                     display: inline-block;
                 }
-
                 #customersTable tr {
                     transition: transform 0.2s ease, box-shadow 0.2s ease;
                 }
-
                 #customersTable tr:hover {
                     transform: scale(1.01);
                     box-shadow: 0 6px 14px rgba(59, 130, 246, 0.15);
                 }
             }
-
             @media (max-width: 768px) {
                 .deleted-table table,
                 .deleted-table thead,
@@ -1106,11 +923,9 @@
                     display: block;
                     width: 100%;
                 }
-
                 .deleted-table thead tr {
                     display: none;
                 }
-
                 .deleted-table tr {
                     margin-bottom: 1rem;
                     background: #fff;
@@ -1118,7 +933,6 @@
                     border-radius: 0.5rem;
                     padding: 0.75rem;
                 }
-
                 .deleted-table td {
                     display: flex;
                     justify-content: space-between;
@@ -1128,7 +942,6 @@
                     border-bottom: 1px solid #eee;
                     font-size: 0.875rem;
                 }
-
                 .deleted-table td::before {
                     content: attr(data-label) ": ";
                     font-weight: 600;
@@ -1137,22 +950,18 @@
                     color: #555;
                     flex: 1;
                 }
-
                 .deleted-table td:last-child {
                     border-bottom: none;
                 }
-
                 .deleted-table .bg-yellow-100,
                 .deleted-table .bg-green-100 {
                     margin-left: auto;
                     white-space: nowrap;
                 }
             }
-
             #specsModal {
                 backdrop-filter: blur(8px);
             }
-
             #specsModal .modal-content {
                 background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
                 border-radius: 20px;
@@ -1161,7 +970,6 @@
                 max-width: 500px;
                 animation: modalSlideIn 0.3s ease-out;
             }
-
             @keyframes modalSlideIn {
                 from {
                     opacity: 0;
@@ -1172,7 +980,6 @@
                     transform: translateY(0) scale(1);
                 }
             }
-
             #specsModal h3 {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 -webkit-background-clip: text;
@@ -1183,14 +990,12 @@
                 align-items: center;
                 gap: 8px;
             }
-
             .specs-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
                 gap: 16px;
                 margin-top: 20px;
             }
-
             .spec-card {
                 background: white;
                 border-radius: 12px;
@@ -1203,12 +1008,10 @@
                 align-items: center;
                 text-align: center;
             }
-
             .spec-card:hover {
                 transform: translateY(-2px);
                 box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
             }
-
             .spec-card .spec-icon {
                 width: 40px;
                 height: 40px;
@@ -1219,14 +1022,12 @@
                 font-size: 16px;
                 margin-bottom: 8px;
             }
-
             .spec-card.size { border-left-color: #3b82f6; }
             .spec-card.size .spec-icon { background: #dbeafe; color: #3b82f6; }
             .spec-card.type { border-left-color: #10b981; }
             .spec-card.type .spec-icon { background: #d1fae5; color: #10b981; }
             .spec-card.laminating { border-left-color: #8b5cf6; }
             .spec-card.laminating .spec-icon { background: #ede9fe; color: #8b5cf6; }
-
             .spec-card .spec-label {
                 font-size: 12px;
                 font-weight: 600;
@@ -1235,32 +1036,26 @@
                 letter-spacing: 0.5px;
                 margin-bottom: 4px;
             }
-
             .spec-card .spec-value {
                 font-size: 18px;
                 font-weight: 700;
                 color: #1f2937;
             }
-
             .spec-card .spec-unknown {
                 color: #9ca3af;
                 font-style: italic;
             }
-
             @media (max-width: 480px) {
                 .specs-grid {
                     grid-template-columns: 1fr;
                 }
             }
-
             .delete-btn {
                 min-height: 32px;
             }
-
             .orders-table {
                 --sticky-bg: white;
             }
-
             .orders-table th:last-child,
             .orders-table td:last-child {
                 position: sticky;
@@ -1271,19 +1066,17 @@
                 min-width: 140px;
                 width: 140px;
             }
-
             .orders-table thead th:last-child {
                 background: #f9fafb;
                 --sticky-bg: #f9fafb;
             }
-
             @media (max-width: 768px) {
                 .orders-table td:last-child::before {
                     content: 'Action: ';
                     font-weight: 600;
                     color: #dc2626;
                 }
-                
+             
                 .orders-table td:last-child {
                     justify-content: flex-start !important;
                     flex-direction: column;
@@ -1293,7 +1086,7 @@
                     padding: 1rem !important;
                     border-radius: 0 0 0.5rem 0.5rem;
                 }
-                
+             
                 .orders-table .delete-btn {
                     align-self: stretch;
                     font-weight: 600;
@@ -1313,7 +1106,6 @@
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-
                 <nav class="sidebar-nav flex-1 overflow-y-auto">
                     <ul class="p-4 space-y-2">
                         <li>
@@ -1354,7 +1146,6 @@
                         </li>
                     </ul>
                 </nav>
-
                 <div class="sidebar-footer p-4 border-t rounded-b-lg">
                     <a href="login_admin.php" class="logout-btn flex items-center space-x-3 w-full p-3 rounded-xl text-white hover:bg-white/10 transition-all duration-200">
                         <i class="fas fa-sign-out-alt w-5"></i>
@@ -1400,7 +1191,6 @@
                                         Dashboard Overview
                                     </h2>
                                 </div>
-
                                 <div class="stats-grid grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                                     <div class="stat-card p-3 rounded-xl shadow-md border border-white/20 flex flex-col items-center justify-center hover:shadow-lg transition duration-300">
                                         <div class="stat-icon p-2 bg-white/20 rounded-lg mb-1">
@@ -1409,7 +1199,6 @@
                                         <h3 id="totalOrdersAdmin" class="text-2xl font-bold text-white leading-tight">0</h3>
                                         <p class="text-white/80 text-xs text-center">Total Orders</p>
                                     </div>
-
                                     <div class="stat-card p-3 rounded-xl shadow-md border border-white/20 flex flex-col items-center justify-center hover:shadow-lg transition duration-300">
                                         <div class="stat-icon p-2 bg-white/20 rounded-lg mb-1">
                                             <i class="fas fa-clock text-white text-lg"></i>
@@ -1417,7 +1206,6 @@
                                         <h3 id="pendingOrdersAdmin" class="text-2xl font-bold text-white leading-tight">0</h3>
                                         <p class="text-white/80 text-xs text-center">Pending Orders</p>
                                     </div>
-
                                     <div class="stat-card p-3 rounded-xl shadow-md border border-white/20 flex flex-col items-center justify-center hover:shadow-lg transition duration-300">
                                         <div class="stat-icon p-2 bg-white/20 rounded-lg mb-1">
                                             <i class="fas fa-users text-white text-lg"></i>
@@ -1425,7 +1213,6 @@
                                         <h3 id="totalCustomers" class="text-2xl font-bold text-white leading-tight">0</h3>
                                         <p class="text-white/80 text-xs text-center">Total Customers</p>
                                     </div>
-
                                     <div class="stat-card p-3 rounded-xl shadow-md border border-white/20 flex flex-col items-center justify-center hover:shadow-lg transition duration-300">
                                         <div class="stat-icon p-2 bg-white/20 rounded-lg mb-1">
                                             <i class="fas fa-peso-sign text-white text-lg"></i>
@@ -1435,7 +1222,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <div class="dashboard-charts">
                                 <div class="chart-container bg-white p-6 rounded-xl shadow-md border border-gray-200">
                                     <h3 class="text-lg font-semibold mb-4 text-gray-900">Orders Overview</h3>
@@ -1459,7 +1245,6 @@
                                     <input type="date" id="dateFilter" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
                                 </div>
                             </div>
-
                             <div class="orders-table overflow-x-auto">
                                 <table class="min-w-full bg-white rounded-xl shadow-md border border-gray-200">
                                     <thead class="bg-gray-50">
@@ -1486,14 +1271,12 @@
                                 </table>
                             </div>
                         </section>
-
                         <section id="customers-section" class="content-section hidden">
                             <div class="customers-header flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 space-y-3 sm:space-y-0">
                                 <h2 class="text-2xl font-semibold text-gray-800 flex items-center gap-2">
                                     <i class="fas fa-users text-blue-500"></i>
                                     Customer Management
                                 </h2>
-
                                 <div class="search-box relative flex-1 max-w-md">
                                     <i class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
                                     <input
@@ -1504,7 +1287,6 @@
                                     />
                                 </div>
                             </div>
-
                             <div class="customers-table overflow-x-auto">
                                 <table class="w-full bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
                                     <thead class="bg-gray-50 text-gray-600 uppercase text-xs font-semibold">
@@ -1517,7 +1299,6 @@
                                             <th class="px-5 py-3 text-left"><i class="fas fa-calendar-alt text-blue-500 mr-1"></i>Join Date</th>
                                         </tr>
                                     </thead>
-
                                     <tbody id="customersTable" class="divide-y divide-gray-100">
                                         <tr>
                                             <td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading customers...</td>
@@ -1526,16 +1307,13 @@
                                 </table>
                             </div>
                         </section>
-
                         <!-- Font Awesome -->
                         <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
-
                         <section id="reports-section" class="content-section hidden px-3 sm:px-6">
                             <div class="reports-header flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
                                 <h2 class="text-lg sm:text-xl font-semibold text-gray-900 text-center sm:text-left w-full sm:w-auto">
                                     Reports & Analytics
                                 </h2>
-
                                 <div class="report-filters flex flex-wrap w-full sm:w-auto gap-2 justify-center sm:justify-end">
                                     <select
                                         id="reportType"
@@ -1545,14 +1323,12 @@
                                         <option value="weekly">Weekly</option>
                                         <option value="monthly">Monthly</option>
                                     </select>
-
                                     <input
                                         type="date"
                                         id="reportDate"
                                         value="<?php echo date('Y-m-d'); ?>"
                                         class="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
                                     />
-
                                     <button
                                         class="w-full sm:w-auto bg-primary text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
                                         id="generateReport"
@@ -1561,7 +1337,6 @@
                                     </button>
                                 </div>
                             </div>
-
                             <div class="report-content space-y-6">
                                 <!-- Summary Cards -->
                                 <div class="report-summary grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
@@ -1571,21 +1346,18 @@
                                         <h4 class="text-sm font-medium text-gray-500">Total Orders</h4>
                                         <span id="reportTotalOrders" class="text-2xl sm:text-3xl font-bold text-gray-900">0</span>
                                     </div>
-
                                     <div
                                         class="summary-card bg-white p-4 sm:p-6 rounded-xl shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
                                     >
                                         <h4 class="text-sm font-medium text-gray-500">Total Revenue</h4>
                                         <span id="reportTotalRevenue" class="text-2xl sm:text-3xl font-bold text-gray-900">₱0</span>
                                     </div>
-
                                     <div
                                         class="summary-card bg-white p-4 sm:p-6 rounded-xl shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
                                     >
                                         <h4 class="text-sm font-medium text-gray-500">New Customers</h4>
                                         <span id="reportNewCustomers" class="text-2xl sm:text-3xl font-bold text-gray-900">0</span>
                                     </div>
-
                                     <div
                                         class="summary-card bg-white p-4 sm:p-6 rounded-xl shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
                                     >
@@ -1593,14 +1365,12 @@
                                         <span id="reportCompletionRate" class="text-2xl sm:text-3xl font-bold text-gray-900">0%</span>
                                     </div>
                                 </div>
-
                                 <!-- Chart -->
                                 <div class="report-chart bg-white p-4 sm:p-6 rounded-xl shadow-md border border-gray-200">
                                     <canvas id="reportChart" class="w-full h-48 sm:h-64"></canvas>
                                 </div>
                             </div>
                         </section>
-
                         <section id="settings-section" class="content-section hidden">
                             <div class="settings-container">
                                 <h2 class="text-xl font-semibold mb-6 text-gray-900">System Settings</h2>
@@ -1646,7 +1416,6 @@
                             <!-- Header + Search -->
                             <div class="deleted-header flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
                                 <h2 class="text-xl font-semibold text-gray-900">Deleted Transactions</h2>
-
                                 <!-- Search Bar -->
                                 <div class="relative w-full sm:w-64">
                                     <input
@@ -1658,7 +1427,6 @@
                                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
                                 </div>
                             </div>
-
                             <!-- Table -->
                             <div class="deleted-table w-full">
                                 <table
@@ -1682,15 +1450,12 @@
                                 </table>
                             </div>
                         </section>
-
                     </div>
                 </main>
             </div>
         </div>
-
         <!-- Toast Container -->
-        <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
-
+        <div id="toast-container" class="fixed top-4 right-4 z-[2000] space-y-2"></div>
         <!-- Status Update Modal -->
         <div id="statusModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
             <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4">
@@ -1707,7 +1472,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Delete Confirm Modal -->
         <div id="deleteModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
             <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4">
@@ -1719,7 +1483,6 @@
                 </div>
             </div>
         </div>
-
         <!-- Improved Specifications Modal -->
         <div id="specsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
             <div class="modal-content bg-white p-0 rounded-2xl shadow-2xl max-w-md w-full mx-4 max-h-[85vh] overflow-hidden">
@@ -1739,12 +1502,10 @@
                 </div>
             </div>
         </div>
-
         <script>
             let currentOrdersChart = null;
             let currentReportChart = null;
             let currentOrderId = null;
-
             // Toast Notification Function
             function showToast(message, type = 'info') {
                 const toast = document.createElement('div');
@@ -1770,49 +1531,41 @@
                 `;
                 const container = document.getElementById('toast-container');
                 container.appendChild(toast);
-
                 // Slide in animation
                 setTimeout(() => {
                     toast.classList.remove('translate-x-full', 'opacity-0');
                     toast.classList.add('translate-x-0', 'opacity-100');
                 }, 100);
-
                 // Auto remove after 4 seconds
                 setTimeout(() => {
                     toast.classList.add('translate-x-full', 'opacity-0');
                     setTimeout(() => toast.remove(), 300);
                 }, 4000);
             }
-
             // Modal Functions
             function openStatusModal(orderId) {
                 currentOrderId = orderId;
                 document.getElementById('statusModal').classList.remove('hidden');
                 document.getElementById('statusSelect').value = '';
             }
-
             function closeStatusModal() {
                 document.getElementById('statusModal').classList.add('hidden');
                 currentOrderId = null;
             }
-
             function openDeleteModal(orderId) {
                 currentOrderId = orderId;
                 document.getElementById('deleteModal').classList.remove('hidden');
             }
-
             function closeDeleteModal() {
                 document.getElementById('deleteModal').classList.add('hidden');
                 currentOrderId = null;
             }
-
             function openSpecsModal(event) {
                 const btn = event.currentTarget;
                 const orderId = btn.dataset.orderId;
                 const service = btn.dataset.service || 'Unknown';
                 const encodedSpecs = btn.dataset.specs;
                 const specs = decodeURIComponent(encodedSpecs);
-
                 // Parse lines for dynamic extraction
                 const lines = specs.split('\n').map(l => l.trim()).filter(l => l);
                 let size = 'Unknown';
@@ -1820,7 +1573,6 @@
                 let lamination = 'No';
                 let sizeLabel = 'Size';
                 let typeLabel = 'Type';
-
                 for (let line of lines) {
                     if (line.startsWith('Paper Size:')) {
                         size = line.split(':')[1].trim();
@@ -1841,13 +1593,11 @@
                         lamination = 'Yes';
                     }
                 }
-
                 // Update modal title with service
                 document.getElementById('specsModalTitle').innerHTML = `
                     <span>${service} - Order #${orderId}</span>
-                   
+                
                 `;
-
                 // Dynamic structured content
                 const modalContent = `
                     <div class="space-y-4">
@@ -1883,20 +1633,16 @@
                         </div>
                     </div>
                 `;
-
                 document.getElementById('specsContent').innerHTML = modalContent;
                 document.getElementById('specsModal').classList.remove('hidden');
-
                 // Close on outside click
                 document.getElementById('specsModal').addEventListener('click', (e) => {
                     if (e.target.id === 'specsModal') closeSpecsModal();
                 }, { once: true });
             }
-
             function closeSpecsModal() {
                 document.getElementById('specsModal').classList.add('hidden');
             }
-
             // FIXED: Enhanced setupModals with validation
             function setupModals() {
                 // Status Modal
@@ -1911,7 +1657,6 @@
                     await updateOrderStatus(currentOrderId, status);
                     closeStatusModal();
                 });
-
                 // Delete Modal
                 document.getElementById('cancelDelete').addEventListener('click', closeDeleteModal);
                 document.getElementById('confirmDelete').addEventListener('click', async () => {
@@ -1923,13 +1668,11 @@
                     await deleteOrder(currentOrderId);
                     closeDeleteModal();
                 });
-
                 // Specs Modal
                 document.getElementById('closeSpecs').addEventListener('click', closeSpecsModal);
                 document.getElementById('specsModal').addEventListener('click', (e) => {
                     if (e.target.id === 'specsModal') closeSpecsModal();
                 });
-
                 // Close modals on backdrop click
                 document.getElementById('statusModal').addEventListener('click', (e) => {
                     if (e.target.id === 'statusModal') closeStatusModal();
@@ -1938,36 +1681,29 @@
                     if (e.target.id === 'deleteModal') closeDeleteModal();
                 });
             }
-
             // FIXED: Enhanced deleteOrder with validation and logging
             async function deleteOrder(orderId) {
-                console.log('🗑️ deleteOrder called with ID:', orderId);  // ← Extra log for debug
+                console.log('🗑️ deleteOrder called with ID:', orderId); // ← Extra log for debug
                 if (!orderId || isNaN(parseInt(orderId))) {
                     console.error('Invalid order ID passed to deleteOrder:', orderId);
                     showToast('Invalid order ID. Please try again.', 'error');
                     return;
                 }
-
-                orderId = parseInt(orderId, 10);  // Ensure it's a number
+                orderId = parseInt(orderId, 10); // Ensure it's a number
                 console.log('🗑️ Attempting to archive order ID:', orderId);
-
                 try {
                     const formData = new FormData();
                     formData.append('action', 'delete_order');
                     formData.append('order_id', orderId);
-
-                    const response = await fetch('admin.php', { 
-                        method: 'POST', 
-                        body: formData 
+                    const response = await fetch('admin.php', {
+                        method: 'POST',
+                        body: formData
                     });
-
                     if (!response.ok) {
                         throw new Error(`Server error: ${response.status} - ${response.statusText}`);
                     }
-
                     const data = await response.json();
                     console.log('Archive response:', data);
-
                     if (data.success) {
                         showToast(data.message, 'success');
                         await loadOrders(); // Reload only on success
@@ -1980,17 +1716,13 @@
                     showToast('Network error during archive. Check connection.', 'error');
                 }
             }
-
             document.addEventListener('DOMContentLoaded', async () => {
                 const searchInput = document.getElementById("searchDeleted");
                 const table = document.getElementById("deletedTransactionsTable");
-
                 if (!searchInput || !table) return;
-
                 searchInput.addEventListener("input", () => {
                     const filter = searchInput.value.toLowerCase().trim();
                     const rows = table.getElementsByTagName("tr");
-
                     for (let i = 0; i < rows.length; i++) {
                         const rowText = rows[i].innerText.toLowerCase();
                         rows[i].style.display = rowText.includes(filter) ? "" : "none";
@@ -1999,7 +1731,6 @@
                 try {
                     const response = await fetch('admin.php?action=verify_admin');
                     const data = await response.json();
-
                     if (!data.isAdmin) {
                         console.warn('❌ Admin session invalid, redirecting to login...');
                         localStorage.clear();
@@ -2007,9 +1738,7 @@
                         window.location.href = 'login.php?session_expired=1';
                         return;
                     }
-
                     console.log('✅ Admin session verified:', data.user);
-
                     setInterval(async () => {
                         try {
                             const check = await fetch('admin.php?action=verify_admin');
@@ -2028,7 +1757,6 @@
                     }, 300000);
                     // Load notifications
                     loadNotifications();
-
                     // Poll for new notifications every 30 seconds
                     setInterval(loadNotifications, 30000);
                     // Load dashboard stats on init
@@ -2056,7 +1784,6 @@
                     window.location.href = 'login.php';
                 }
             });
-
             function setupMobileToggle() {
                 const toggleBtn = document.getElementById('toggleSidebarMobile');
                 const sidebar = document.getElementById('sidebar');
@@ -2081,16 +1808,13 @@
                     link.addEventListener('click', async function(e) {
                         e.preventDefault();
                         const targetSection = this.getAttribute('data-section');
-
                         // Update active link
                         navLinks.forEach(l => {
                             l.classList.remove('active:bg-white/20', 'active:text-white', 'bg-white/20', 'text-white');
                         });
                         this.classList.add('bg-white/20', 'text-white');
-
                         // Update page title
                         pageTitle.textContent = titleMap[targetSection] || 'Admin Dashboard';
-
                         // Show/hide sections
                         sections.forEach(section => {
                             section.classList.add('hidden');
@@ -2105,12 +1829,10 @@
                                 section.classList.add('active');
                             }
                         });
-
                         // Close sidebar on mobile
                         if (window.innerWidth <= 768) {
                             sidebar.classList.add('-translate-x-full');
                         }
-
                         // Load section-specific content
                         switch (targetSection) {
                             case 'dashboard':
@@ -2127,7 +1849,7 @@
                                 generateReport();
                                 break;
                             case 'settings':
-                                await loadPricing();  // Load dynamic pricing
+                                await loadPricing(); // Load dynamic pricing
                                 break;
                             case 'deleted-transactions-section':
                                 await loadDeletedTransactions();
@@ -2152,7 +1874,6 @@
                 try {
                     const response = await fetch('admin.php?action=dashboard_stats');
                     const data = await response.json();
-
                     if (data.totalOrders !== undefined) {
                         document.getElementById('totalOrdersAdmin').textContent = data.totalOrders;
                         document.getElementById('pendingOrdersAdmin').textContent = data.pendingOrders;
@@ -2167,7 +1888,6 @@
                 try {
                     const response = await fetch('admin.php?action=fetch_order_status_counts');
                     const data = await response.json();
-
                     if (data.success) {
                         const canvas = document.getElementById('ordersChart');
                         const ctx = canvas.getContext('2d');
@@ -2184,7 +1904,7 @@
                                         '#e0be00ff', // Pending: Violet (matches theme)
                                         '#3089f5ff', // In Progress: Light Blue
                                         '#16eb07ff', // Completed: Emerald Green
-                                        '#fb2427ff'  // Cancelled: Amber Yellow
+                                        '#fb2427ff' // Cancelled: Amber Yellow
                                     ],
                                     borderWidth: 3, // Increased for better definition
                                     borderColor: '#ffffff',
@@ -2245,27 +1965,22 @@
                 try {
                     const response = await fetch(`admin.php?${params}`);
                     const data = await response.json();
-
                     if (data.success) {
                         const tbody = document.getElementById('adminOrdersTable');
                         tbody.innerHTML = ''; // Clear existing rows
-
                         if (data.orders.length === 0) {
                             tbody.innerHTML = '<tr><td colspan="12" class="px-4 py-8 text-center text-gray-500">No orders found</td></tr>';
                             return;
                         }
-
                         data.orders.forEach(order => {
                             // Handle defaults
                             if (!order.customer_name) order.customer_name = 'Unknown';
                             if (!order.quantity) order.quantity = 0;
                             const files = order.files === 'No files' ? 'No files' : order.files.split(',').map(f => `<a href="${f.trim()}" target="_blank" class="text-blue-500 underline">View</a>`).join(', ');
-
                             // Status badge class
                             const statusClass = order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                                             order.status === 'in-progress' ? 'bg-blue-100 text-blue-800' :
                                             order.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-
                             const row = tbody.insertRow();
                             row.innerHTML = `
                                 <td data-label="Order ID" class="px-2 py-2"><span class="font-medium">#${order.order_id}</span></td>
@@ -2273,8 +1988,8 @@
                                 <td data-label="Service" class="px-2 py-2 service-cell">${order.service}</td>
                                 <td data-label="Quantity" class="px-2 py-2">${order.quantity}</td>
                                 <td data-label="Details" class="px-2 py-2 specs-cell">
-                                    <button class="view-specs-btn" 
-                                            data-order-id="${order.order_id}" 
+                                    <button class="view-specs-btn"
+                                            data-order-id="${order.order_id}"
                                             data-service="${order.service}"
                                             data-specs="${encodeURIComponent(order.specifications || 'No specifications provided')}">
                                         <i class="fas fa-eye mr-1"></i>View Details
@@ -2299,38 +2014,32 @@
                                     </button>
                                     </td>
                             `;
-
                             // Event listeners for new row elements
                             const statusSelect = row.querySelector('.status-select');
                             if (statusSelect) {
                                 statusSelect.addEventListener('change', (e) => updateOrderStatus(e.target.dataset.orderId, e.target.value));
                             }
-
                             const viewBtn = row.querySelector('.view-specs-btn');
                             if (viewBtn) {
                                 viewBtn.addEventListener('click', openSpecsModal);
                             }
-
                             // FIXED: Enhanced delete button listener with validation
                             const deleteBtn = row.querySelector('.delete-btn');
                             if (deleteBtn) {
                                 deleteBtn.addEventListener('click', (e) => {
                                     let orderId = e.currentTarget.dataset.orderId;
                                     console.log('Delete button clicked, raw dataset.orderId:', orderId);
-
                                     if (!orderId) {
                                         console.error('❌ Order ID missing from button dataset');
                                         showToast('Error: Order ID not found on this row', 'error');
                                         return;
                                     }
-
                                     orderId = parseInt(orderId, 10);
                                     if (isNaN(orderId) || orderId <= 0) {
                                         console.error('❌ Invalid Order ID parsed:', orderId);
                                         showToast('Error: Invalid Order ID on this row', 'error');
                                         return;
                                     }
-
                                     console.log('✅ Valid order ID for delete modal:', orderId);
                                     openDeleteModal(orderId);
                                     currentOrderId = orderId;
@@ -2388,7 +2097,6 @@
                 try {
                     const response = await fetch('admin.php?action=fetch_customers');
                     const customers = await response.json();
-
                     const tbody = document.getElementById('customersTable');
                     if (Array.isArray(customers)) {
                         tbody.innerHTML = customers.map(customer => `
@@ -2431,7 +2139,6 @@
                     // Load stats
                     const statsResponse = await fetch(`admin.php?action=fetch_report_stats&report_type=${reportType}&report_date=${reportDate}`);
                     const statsData = await statsResponse.json();
-
                     if (statsData.success) {
                         document.getElementById('reportTotalOrders').textContent = statsData.totalOrders;
                         document.getElementById('reportTotalRevenue').innerHTML = '₱' + statsData.totalRevenue;
@@ -2441,7 +2148,6 @@
                     // Load chart data
                     const chartResponse = await fetch(`admin.php?action=fetch_chart_data&report_type=${reportType}&report_date=${reportDate}`);
                     const chartData = await chartResponse.json();
-
                     if (chartData.success) {
                         const canvas = document.getElementById('reportChart');
                         const ctx = canvas.getContext('2d');
@@ -2538,7 +2244,6 @@
                 try {
                     const response = await fetch('admin.php?action=fetch_deleted_orders');
                     const data = await response.json();
-
                     if (data.success) {
                         const tbody = document.getElementById('deletedTransactionsTable');
                         tbody.innerHTML = data.orders.map(order => `
@@ -2562,15 +2267,12 @@
                 try {
                     const response = await fetch('admin.php?action=fetch_notifications');
                     const data = await response.json();
-
                     if (data.success) {
                         const badge = document.getElementById('notificationBadge');
                         const dropdown = document.getElementById('notificationDropdown');
                         const list = document.getElementById('notificationList');
-
                         badge.textContent = data.unreadCount;
                         badge.classList.toggle('hidden', data.unreadCount <= 0);
-
                         if (data.notifications.length === 0) {
                             list.innerHTML = '<div class="p-5 text-center text-gray-500">No new notifications</div>';
                         } else {

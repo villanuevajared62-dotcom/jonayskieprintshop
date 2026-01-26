@@ -54,17 +54,102 @@ if (isset($_GET['token'])) {
     <title>Reset Password | Jonayskie Prints</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Font Awesome for eye icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { background: #e6eefc; font-family: 'Poppins', sans-serif; }
-        .container { background: #fff; max-width: 400px; margin: 60px auto; padding: 35px 30px; border-radius: 10px; box-shadow: 0 8px 25px #3b82f690; }
-        h2 { color: #274c77; margin-bottom: 20px; }
-        label { font-weight: 500; color: #274c77; }
-        input[type="password"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 2px solid #b7c8ed; border-radius: 6px; }
-        button { background: #3b82f6; color: #fff; border: none; padding: 12px; border-radius: 6px; width: 100%; font-size: 16px; font-weight: 600; cursor: pointer; }
-        button:hover { background: #2563eb; }
-        .message { margin-t op: 20px; padding: 12px; border-radius: 6px; font-size: 15px; }
-        .success { background: #d1fae5; color: #065f46; border: 1px solid #10b981; }
-        .error { background: #fee2e2; color: #991b1b; border: 1px solid #ef4444; }
+        body { 
+            background: #e6eefc; 
+            font-family: 'Poppins', sans-serif; 
+            margin: 0;
+            padding: 20px;
+        }
+        .container { 
+            background: #fff; 
+            max-width: 400px; 
+            margin: 60px auto; 
+            padding: 35px 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 8px 25px #3b82f690; 
+        }
+        h2 { 
+            color: #274c77; 
+            margin-bottom: 20px; 
+            text-align: center;
+        }
+        label { 
+            font-weight: 500; 
+            color: #274c77; 
+            display: block;
+            margin-bottom: 5px;
+        }
+        .password-group { 
+            position: relative; 
+            margin-bottom: 15px; 
+        }
+        input[type="password"], input[type="text"] { 
+            width: 100%; 
+            padding: 10px 40px 10px 10px; 
+            border: 2px solid #b7c8ed; 
+            border-radius: 6px; 
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        .toggle-password { 
+            position: absolute; 
+            right: 10px; 
+            top: 50%; 
+            transform: translateY(-50%); 
+            background: none; 
+            border: none; 
+            color: #6b7280; 
+            cursor: pointer; 
+            font-size: 16px; 
+        }
+        .toggle-password:hover { 
+            color: #3b82f6; 
+        }
+        button[type="submit"] { 
+            background: #3b82f6; 
+            color: #fff; 
+            border: none; 
+            padding: 12px; 
+            border-radius: 6px; 
+            width: 100%; 
+            font-size: 16px; 
+            font-weight: 600; 
+            cursor: pointer; 
+        }
+        button[type="submit"]:hover { 
+            background: #2563eb; 
+        }
+        .message { 
+            margin-top: 20px; 
+            padding: 12px; 
+            border-radius: 6px; 
+            font-size: 15px; 
+            text-align: center;
+        }
+        .success { 
+            background: #d1fae5; 
+            color: #065f46; 
+            border: 1px solid #10b981; 
+        }
+        .error { 
+            background: #fee2e2; 
+            color: #991b1b; 
+            border: 1px solid #ef4444; 
+        }
+        .login-link {
+            display: block; 
+            margin-top: 20px; 
+            color: #2563eb; 
+            text-align: center; 
+            font-weight: 600; 
+            text-decoration: none;
+        }
+        .login-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -73,16 +158,41 @@ if (isset($_GET['token'])) {
         <?php if ($tokenValid): ?>
             <form method="POST">
                 <label for="password">New Password</label>
-                <input type="password" id="password" name="password" required minlength="<?php echo defined('PASSWORD_MIN_LENGTH') ? PASSWORD_MIN_LENGTH : 8; ?>" placeholder="Enter new password">
+                <div class="password-group">
+                    <input type="password" id="password" name="password" required minlength="<?php echo defined('PASSWORD_MIN_LENGTH') ? PASSWORD_MIN_LENGTH : 8; ?>" placeholder="Enter new password">
+                    <button type="button" class="toggle-password" onclick="togglePassword('password')">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
                 <label for="confirm_password">Confirm New Password</label>
-                <input type="password" id="confirm_password" name="confirm_password" required minlength="<?php echo defined('PASSWORD_MIN_LENGTH') ? PASSWORD_MIN_LENGTH : 8; ?>" placeholder="Confirm new password">
+                <div class="password-group">
+                    <input type="password" id="confirm_password" name="confirm_password" required minlength="<?php echo defined('PASSWORD_MIN_LENGTH') ? PASSWORD_MIN_LENGTH : 8; ?>" placeholder="Confirm new password">
+                    <button type="button" class="toggle-password" onclick="togglePassword('confirm_password')">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </div>
                 <button type="submit">Reset Password</button>
             </form>
         <?php endif; ?>
         <?php echo $message; ?>
         <?php if ($showLoginLink): ?>
-            <a href="login.php" style="display:block; margin-top:20px; color:#2563eb; text-align:center; font-weight:600;">Go to Login Page →</a>
+            <a href="login.php" class="login-link">Go to Login Page →</a>
         <?php endif; ?>
     </div>
+    <script>
+        function togglePassword(inputId) {
+            const input = document.getElementById(inputId);
+            const icon = input.nextElementSibling.querySelector('i');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+    </script>
 </body>
 </html>
